@@ -73,11 +73,12 @@ def check_file(file_path, strict=False):
         if stripped.startswith("#") and "Google Antigravity" in stripped:
             continue
 
+        is_python_source = path_obj.suffix.lower() == ".py"
         for rule in LINT_RULES:
             match = rule["regex"].search(line)
             if match:
-                # Discard match if this line is explaining the rule (e.g. docstring or documentation)
-                if "regex" in line or "pattern" in line or "rule" in line:
+                # Only suppress in python source if the line is defining the lint regex itself
+                if is_python_source and ("re.compile" in line or '"regex":' in line):
                     continue
                 severity = "ERROR" if (strict or rule["severity"] == "ERROR") else "WARNING"
                 violations.append({
