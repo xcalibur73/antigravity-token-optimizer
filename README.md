@@ -8,6 +8,24 @@ Unshielded Antigravity agent sessions rapidly burn millions of tokens. A standar
 
 By enforcing the 7 Antigravity Invariants, Antigravity Token Optimizer delivers an empirical 75.0% raw token reduction. Across a standard 25-turn workflow, Mode A consumes 1,352,000 cumulative input tokens across 25 turns with a 0.0% KV cache hit rate. Mode B consumes 338,000 total tokens with 260,000 cached tokens and 13,400 delta tokens, achieving a 75.0% raw token reduction and a 95.1% KV cache hit rate.
 
+## 10-Second Quickstart
+
+Install the hardened Antigravity Token Optimizer invariants directly into your global Antigravity environment with a single Windows PowerShell command:
+
+```powershell
+# One-line installation in Windows PowerShell
+irm https://raw.githubusercontent.com/xcalibur73/antigravity-token-optimizer/main/install.ps1 | iex
+```
+
+### Non-Destructive Backup Protection
+
+The automated installer guarantees safety through non-destructive execution:
+1. Target Resolution: Automatically locates `$HOME/.gemini/config/rules/AGENTS.md`, with support for the `$env:ANTIGRAVITY_RULES_PATH` and `$env:AGY_RULES_PATH` environment overrides.
+2. Non-Destructive Backup: If an existing rules file is found, a timestamped backup copy (`AGENTS.md.bak.<yyyyMMdd_HHmmss>`) is created immediately before any modifications occur.
+3. Idempotent Invariant Injection: Scans the target file to check if Antigravity Invariants already exist. If present, it reports that the system is already optimized and exits cleanly. If absent, it appends the production invariants using explicit UTF-8 encoding.
+4. Automated Verification: Immediately invokes `tools/antigravity_prefix_linter.py` on the resulting rules file to verify exit code 0 before completing.
+5. Dry-Run Support: Pass `-DryRun` or `-WhatIf` to simulate execution and preview target paths without writing any files or altering disk state.
+
 ## Core Architecture: The Antigravity Prompt Caching Engine
 
 Google Antigravity coordinates with Gemini model endpoints that implement deterministic Key-Value (KV) cache prefix matching. Gemini KV prompt caching operates on an exact byte-for-byte prefix hash from position zero. All empirical benchmarks in this repository were measured against Gemini 3.8 Flash (gemini-3.8-flash) on the Google Antigravity runtime (v2.0).
@@ -119,14 +137,34 @@ TOTAL 1,352,000       260,000         13,400        273,400                    9
 
 Antigravity Token Optimizer rules can be deployed globally across all workspaces or per repository.
 
-### Global Installation (Antigravity Environment)
+### Option 1: One-Line Automated Installer (Recommended)
+
+Run the automated installer in Windows PowerShell:
+
+```powershell
+# Default installation to $HOME/.gemini/config/rules/AGENTS.md
+irm https://raw.githubusercontent.com/xcalibur73/antigravity-token-optimizer/main/install.ps1 | iex
+```
+
+You can also run the installer locally with custom options:
+
+```powershell
+# Local execution with dry-run inspection
+.\install.ps1 -DryRun
+
+# Local execution targeting a custom rules destination
+.\install.ps1 -TargetRulesPath "C:\custom\path\AGENTS.md"
+```
+
+### Option 2: Manual Global Installation
+
 Copy the hardened rules file to your user configuration directory:
 
 ```powershell
 Copy-Item -Path "rules/AGENTS.md" -Destination "~/.gemini/config/rules/AGENTS.md" -Force
 ```
 
-### Repository-Level Installation
+### Option 3: Repository-Level Installation
 To enforce rules for a specific repository:
 
 ```powershell
@@ -174,6 +212,7 @@ antigravity-token-optimizer/
 |-- .gitignore                             # Ignores scratch, logs, and python caches
 |-- LICENSE                                # MIT License
 |-- README.md                              # Technical documentation and empirical receipts
+|-- install.ps1                            # One-line non-destructive PowerShell installer
 |-- rules/
 |   `-- AGENTS.md                          # Drop-in rules file for Antigravity prompt caching
 |-- proof/
