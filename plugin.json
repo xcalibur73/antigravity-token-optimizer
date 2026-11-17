@@ -1,0 +1,20 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "antigravity-token-optimizer",
+  "version": "1.1.0",
+  "description": "Strict Gemini KV prompt caching and token optimization invariants for Google Antigravity.",
+  "author": {
+    "name": "xcalibur73"
+  },
+  "homepage": "https://github.com/xcalibur73/antigravity-token-optimizer",
+  "repository": "https://github.com/xcalibur73/antigravity-token-optimizer",
+  "license": "MIT",
+  "keywords": [
+    "antigravity",
+    "token-optimizer",
+    "prompt-caching",
+    "gemini-3.8-flash",
+    "kv-cache",
+    "prefix-invariance"
+  ]
+}

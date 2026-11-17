@@ -172,6 +172,15 @@ New-Item -ItemType Directory -Path ".agents/rules" -Force
 Copy-Item -Path "rules/AGENTS.md" -Destination ".agents/rules/AGENTS.md" -Force
 ```
 
+### Option 4: Native Antigravity Plugin Installation
+To install as a native Google Antigravity plugin:
+
+```bash
+agy plugin install path/to/antigravity-token-optimizer
+# Or install directly from GitHub
+agy plugin install github:xcalibur73/antigravity-token-optimizer
+```
+
 ## CLI Verification and Tools
 
 The repository includes a suite of standalone verification scripts using only the Python standard library.
@@ -205,21 +214,64 @@ Demonstrates PowerShell command output redirection and the Head-and-Tail Observa
 powershell -ExecutionPolicy Bypass -File examples/terminal_distillation_pattern.ps1
 ```
 
+### 5. Run MCP Schema Compressor
+Enforces Invariant 6 (Deterministic Tool Schema Ordering) and compresses verbose tool definitions before registration at the prompt head. Prunes redundant nulls, empty default objects, and schema boilerplate while condensing docstrings into concise single-sentence noun phrases:
+
+```bash
+# Preview compression and display token economy metrics
+python tools/mcp_schema_compressor.py --input schema.json --info
+
+# Compress schema in place
+python tools/mcp_schema_compressor.py --input schema.json --in-place
+
+# Minify schema for prompt registration
+python tools/mcp_schema_compressor.py --input schema.json --output minified.json --minify
+
+# Check if schema is already optimal and sorted (CI mode: exits with code 1 if not)
+python tools/mcp_schema_compressor.py --input schema.json --check
+```
+
+### 6. Run Unit Test Suite
+Runs formal unit tests covering prefix invariance rules, regex evasion checks, tool ordering validation, schema compressor idempotence, and CLI flags:
+
+```bash
+python -m unittest discover tests
+```
+
+## Continuous Integration
+
+The repository includes automated CI via GitHub Actions (`.github/workflows/ci.yml`) running across:
+1. Matrix environments: Ubuntu (`ubuntu-latest`) and Windows (`windows-latest`) with Python 3.10 and 3.12.
+2. Test automation: Discovers and executes the complete unit test suite (`python -m unittest discover tests`).
+3. Static prefix linting: Verifies that production rules maintain prompt caching prefix invariance (`python tools/antigravity_prefix_linter.py rules/AGENTS.md`).
+4. Automated installer validation: Verifies that the PowerShell installer executes cleanly in dry-run mode (`powershell -ExecutionPolicy Bypass -File install.ps1 -DryRun`).
+
 ## Repository Structure
 
 ```
 antigravity-token-optimizer/
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml                         # Multi-OS matrix CI workflow
 |-- .gitignore                             # Ignores scratch, logs, and python caches
 |-- LICENSE                                # MIT License
 |-- README.md                              # Technical documentation and empirical receipts
 |-- install.ps1                            # One-line non-destructive PowerShell installer
+|-- plugin.json                            # Native Antigravity plugin manifest
 |-- rules/
 |   `-- AGENTS.md                          # Drop-in rules file for Antigravity prompt caching
+|-- skills/
+|   `-- token-optimizer/
+|       `-- SKILL.md                       # Antigravity skill for prompt caching invariants
 |-- proof/
 |   |-- benchmark_proof.py                 # Deterministic 25-turn benchmark script
 |   `-- proof_results.json                 # Exported empirical metrics and receipts
 |-- tools/
-|   `-- antigravity_prefix_linter.py       # CLI linter guarding prefix invariance
+|   |-- antigravity_prefix_linter.py       # CLI linter guarding prefix invariance
+|   `-- mcp_schema_compressor.py           # Deterministic tool schema compressor
+|-- tests/
+|   |-- test_prefix_linter.py              # Unit tests for prefix linter and evasion checks
+|   `-- test_schema_compressor.py          # Unit tests for schema compressor and idempotence
 `-- examples/
     |-- reactive_watchdog_pattern.py       # Event scheduling and watchdog pattern
     `-- terminal_distillation_pattern.ps1  # PowerShell stream redirection pattern

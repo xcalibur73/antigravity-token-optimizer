@@ -232,6 +232,27 @@ def check_file(file_path, strict=False):
     tool_violations = check_tool_ordering(file_path, lines, full_text)
     violations.extend(tool_violations)
 
+    # Check for multi-line dynamic interpolation evasion attempts
+    multiline_interpolation = re.compile(
+        r"{{\s*(?:timestamp|date|time|now|uuid|session_id|request_id|nonce)\s*}}",
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in multiline_interpolation.finditer(full_text):
+        matched_str = match.group(0)
+        if "\n" in matched_str:
+            start_pos = match.start()
+            line_idx = full_text[:start_pos].count("\n") + 1
+            violations.append({
+                "file": str(file_path),
+                "line": line_idx,
+                "rule": "DYNAMIC_INTERPOLATION",
+                "matched": matched_str.replace("\n", " ")[:60],
+                "line_text": matched_str.replace("\n", " ")[:120],
+                "message": "Dynamic template interpolation in prompt prefix",
+                "severity": "ERROR",
+                "fix": "Move dynamic variables from system prompt prefix to the tail of user turns.",
+            })
+
     return violations
 
 
