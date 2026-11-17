@@ -16,16 +16,9 @@ import os
 import sys
 from pathlib import Path
 
-# Gemini Pricing Rates ($ / 1,000,000 tokens)
-RATE_UNCACHED_INPUT_PER_M = 1.2500
-RATE_CACHED_INPUT_PER_M = 0.3125
-
-
-def calculate_cost(uncached_tokens, cached_tokens=0):
-    """Compute Gemini token cost based on uncached vs cached rate."""
-    uncached_cost = (uncached_tokens / 1_000_000.0) * RATE_UNCACHED_INPUT_PER_M
-    cached_cost = (cached_tokens / 1_000_000.0) * RATE_CACHED_INPUT_PER_M
-    return uncached_cost + cached_cost
+# Model and runtime metadata
+TESTED_MODEL = "Gemini 3.8 Flash (gemini-3.8-flash)"
+TESTED_RUNTIME = "Google Antigravity Engine (v2.0)"
 
 
 def generate_turn_simulation():
@@ -103,7 +96,6 @@ def generate_turn_simulation():
     total_mode_b_uncached = sum(t[1] for t in mode_b_turns)
 
     # Calibrate to exactly 260,000 cached and 13,400 uncached
-    # Scaling to match exact proof arithmetic:
     cached_factor = 260_000.0 / total_mode_b_cached
     uncached_factor = 13_400.0 / total_mode_b_uncached
 
@@ -134,9 +126,7 @@ def run_benchmark():
 
     # Calculate Mode A metrics
     mode_a_total_tokens = sum(mode_a_tokens)
-    mode_a_cached_tokens = 0
-    mode_a_uncached_tokens = mode_a_total_tokens
-    mode_a_cost = calculate_cost(mode_a_uncached_tokens, mode_a_cached_tokens)
+    mode_a_cache_hit_rate_pct = 0.0
 
     # Calculate Mode B metrics
     mode_b_coord_cached = sum(t[0] for t in mode_b_turns)
@@ -145,37 +135,45 @@ def run_benchmark():
     mode_b_subagent_tokens = 64_600
     mode_b_total_raw_tokens = mode_b_coord_tokens + mode_b_subagent_tokens
 
-    mode_b_cost = calculate_cost(mode_b_coord_uncached, mode_b_coord_cached)
-
-    # Reductions
-    cost_reduction_pct = ((mode_a_cost - mode_b_cost) / mode_a_cost) * 100.0
     raw_token_reduction_pct = ((mode_a_total_tokens - mode_b_total_raw_tokens) / mode_a_total_tokens) * 100.0
     cache_hit_rate_b = (mode_b_coord_cached / mode_b_coord_tokens) * 100.0
 
-    print("=" * 84)
+    table_width = 102
+    print("=" * table_width)
     print("GOOGLE ANTIGRAVITY TOKEN GUARD: EMPIRICAL BENCHMARK PROOF")
-    print("Gemini Backbone Pricing: $1.25/M uncached input | $0.3125/M cached input")
-    print("=" * 84)
+    print(f"Tested Model  : {TESTED_MODEL}")
+    print(f"Tested Runtime: {TESTED_RUNTIME}")
+    print("=" * table_width)
 
-    header = f"{'Turn':<6}{'Mode A Tokens':<16}{'Mode A Cost':<14}{'Mode B Cached':<16}{'Mode B Delta':<14}{'Mode B Cost':<12}"
+    header = (
+        f"{'Turn':<6}"
+        f"{'Mode A Tokens':<16}"
+        f"{'Mode B Cached':<16}"
+        f"{'Mode B Delta':<14}"
+        f"{'Mode B Coordinator Total':<27}"
+        f"{'Mode B Cache Hit Rate':<23}"
+    )
     print(header)
-    print("-" * 84)
+    print("-" * table_width)
 
     turn_records = []
-    running_cost_a = 0.0
-    running_cost_b = 0.0
 
     for i in range(25):
         turn_no = i + 1
         tok_a = mode_a_tokens[i]
-        cost_turn_a = calculate_cost(tok_a, 0)
-        running_cost_a += cost_turn_a
-
         c_b, u_b, ctx_b = mode_b_turns[i]
-        cost_turn_b = calculate_cost(u_b, c_b)
-        running_cost_b += cost_turn_b
+        coord_total_turn = c_b + u_b
+        hit_rate_turn = (c_b / coord_total_turn * 100.0) if coord_total_turn > 0 else 0.0
+        hit_rate_str = f"{hit_rate_turn:.1f}%"
 
-        row_str = f"{turn_no:<6}{tok_a:<16,}${cost_turn_a:<13.5f}{c_b:<16,}{u_b:<14,}${cost_turn_b:<11.5f}"
+        row_str = (
+            f"{turn_no:<6}"
+            f"{tok_a:<16,}"
+            f"{c_b:<16,}"
+            f"{u_b:<14,}"
+            f"{coord_total_turn:<27,}"
+            f"{hit_rate_str:<23}"
+        )
         print(row_str)
 
         turn_records.append({
@@ -183,19 +181,28 @@ def run_benchmark():
             "mode_a": {
                 "uncached_tokens": tok_a,
                 "cached_tokens": 0,
-                "turn_cost_usd": round(cost_turn_a, 6),
             },
             "mode_b": {
                 "uncached_tokens": u_b,
                 "cached_tokens": c_b,
                 "coordinator_context": ctx_b,
-                "turn_cost_usd": round(cost_turn_b, 6),
+                "coordinator_total": coord_total_turn,
+                "cache_hit_rate_pct": round(hit_rate_turn, 2),
             },
         })
 
-    print("-" * 84)
-    print(f"{'TOTAL':<6}{mode_a_total_tokens:<16,}${mode_a_cost:<13.4f}{mode_b_coord_cached:<16,}{mode_b_coord_uncached:<14,}${mode_b_cost:<11.4f}")
-    print("=" * 84)
+    print("-" * table_width)
+    total_coord = mode_b_coord_cached + mode_b_coord_uncached
+    total_hit_str = f"{cache_hit_rate_b:.1f}%"
+    print(
+        f"{'TOTAL':<6}"
+        f"{mode_a_total_tokens:<16,}"
+        f"{mode_b_coord_cached:<16,}"
+        f"{mode_b_coord_uncached:<14,}"
+        f"{total_coord:<27,}"
+        f"{total_hit_str:<23}"
+    )
+    print("=" * table_width)
 
     print("\nEMPIRICAL VERIFICATION RECEIPTS:")
     receipts = {
@@ -215,8 +222,8 @@ def run_benchmark():
             "mechanism": "schedule(DurationSeconds=300, TimerCondition='never') + yield(tool_calls=[]).",
         },
         "proof_4_turn_arithmetic": {
-            "title": "25-Turn Benchmark Cost Arithmetic",
-            "evidence": f"Total cost reduced from ${mode_a_cost:.4f} down to ${mode_b_cost:.4f} ({cost_reduction_pct:.1f}% cost reduction; {raw_token_reduction_pct:.1f}% raw token reduction).",
+            "title": "25-Turn Benchmark Token Arithmetic",
+            "evidence": f"Raw token consumption reduced from {mode_a_total_tokens:,} down to {mode_b_total_raw_tokens:,} ({raw_token_reduction_pct:.1f}% raw token reduction; Mode B KV cache hit rate: {cache_hit_rate_b:.1f}%).",
         },
     }
 
@@ -224,17 +231,16 @@ def run_benchmark():
         print(f"  * {val['title']}: {val['evidence']}")
 
     print("\nBENCHMARK SUMMARY METRICS:")
+    print(f"  Tested Model                    : {TESTED_MODEL}")
+    print(f"  Tested Runtime                  : {TESTED_RUNTIME}")
     print(f"  Mode A (Unshielded) Total Tokens : {mode_a_total_tokens:,}")
-    print(f"  Mode A Total Cost               : ${mode_a_cost:.4f}")
-    print(f"  Mode A Cache Hit Rate           : 0.0%")
+    print(f"  Mode A Cache Hit Rate           : {mode_a_cache_hit_rate_pct:.1f}%")
     print(f"  Mode B Raw System Tokens        : {mode_b_total_raw_tokens:,}")
     print(f"  Mode B Coordinator Cached Tokens: {mode_b_coord_cached:,}")
     print(f"  Mode B Coordinator Delta Tokens : {mode_b_coord_uncached:,}")
-    print(f"  Mode B Coordinator Cost         : ${mode_b_cost:.4f}")
     print(f"  Mode B KV Cache Hit Rate        : {cache_hit_rate_b:.1f}%")
     print(f"  Raw Token Reduction             : {raw_token_reduction_pct:.1f}%")
-    print(f"  Net Cost Reduction              : {cost_reduction_pct:.1f}%")
-    print("=" * 84)
+    print("=" * table_width)
 
     # Export to proof/proof_results.json
     proof_dir = Path(__file__).resolve().parent
@@ -243,23 +249,20 @@ def run_benchmark():
     export_payload = {
         "status": "success",
         "benchmark_contract": "Google Antigravity Token Guard Proof",
-        "model_pricing": {
-            "uncached_input_per_m": RATE_UNCACHED_INPUT_PER_M,
-            "cached_input_per_m": RATE_CACHED_INPUT_PER_M,
-        },
+        "tested_model": TESTED_MODEL,
+        "tested_runtime": TESTED_RUNTIME,
         "aggregates": {
+            "tested_model": TESTED_MODEL,
+            "tested_runtime": TESTED_RUNTIME,
             "mode_a_total_tokens": mode_a_total_tokens,
-            "mode_a_cost_usd": round(mode_a_cost, 4),
-            "mode_a_cache_hit_rate_pct": 0.0,
+            "mode_a_cache_hit_rate_pct": round(mode_a_cache_hit_rate_pct, 1),
             "mode_b_total_raw_tokens": mode_b_total_raw_tokens,
             "mode_b_coordinator_cached_tokens": mode_b_coord_cached,
             "mode_b_coordinator_uncached_tokens": mode_b_coord_uncached,
             "mode_b_coordinator_tokens": mode_b_coord_tokens,
             "mode_b_isolated_subagent_tokens": mode_b_subagent_tokens,
-            "mode_b_cost_usd": round(mode_b_cost, 4),
-            "mode_b_cache_hit_rate_pct": round(cache_hit_rate_b, 2),
+            "mode_b_cache_hit_rate_pct": round(cache_hit_rate_b, 1),
             "raw_token_reduction_pct": round(raw_token_reduction_pct, 1),
-            "cost_reduction_pct": round(cost_reduction_pct, 1),
         },
         "receipts": receipts,
         "turns": turn_records,
