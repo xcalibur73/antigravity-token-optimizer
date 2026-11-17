@@ -1,0 +1,9 @@
+# Antigravity Token Guard ignore patterns
+scratch/
+logs/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.log
