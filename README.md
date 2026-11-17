@@ -287,3 +287,24 @@ When configuring Antigravity agents, confirm:
 5. Coordinators yield with zero tool calls and arm a schedule watchdog instead of polling.
 6. Tool definitions, function declarations, and parameter definitions are sorted alphabetically by identifier name.
 7. Runtime state updates and environment deltas are appended to the conversation tail rather than mutated in place.
+
+## Contributing: Fork and Pull Requests
+
+If you have discovered an unhandled prefix cache leak, built a compression rule for another tool schema format, captured a reproducible benchmark trace, or engineered a workflow improvement for Google Antigravity, your contributions are welcome.
+
+### How to Contribute
+
+1. Fork the repository on GitHub: Click the Fork button at the top right of this page to create your own copy.
+2. Create an isolated branch: `git checkout -b feature/your-optimization-name`.
+3. Add your implementation: Ground every rule or utility in deterministic verification. Follow standard library precedence and avoid external dependencies.
+4. Run the local verification battery:
+   ```bash
+   python -m unittest discover tests
+   python tools/antigravity_prefix_linter.py rules/AGENTS.md
+   powershell -ExecutionPolicy Bypass -File install.ps1 -DryRun
+   ```
+5. Commit and push: Write descriptive commit messages following conventional commit standards (`feat:`, `fix:`, `refactor:`).
+6. Open a Pull Request: Push to your fork and submit a PR against `main`. Automated GitHub Actions CI will run unit tests and prefix linter audits across both Ubuntu and Windows runners.
+
+Have an empirical trace, runtime finding, or token caching anomaly to discuss? Open a GitHub Issue to share your logs and measurements.
+
