@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Google Antigravity Token Guard Benchmark Proof.
+"""Google Antigravity Token Optimizer Benchmark Proof.
 
 Deterministically simulates and benchmarks:
 Mode A: Unshielded Antigravity agent (dynamic prefix, unshielded terminal stdout,
@@ -140,7 +140,7 @@ def run_benchmark():
 
     table_width = 102
     print("=" * table_width)
-    print("GOOGLE ANTIGRAVITY TOKEN GUARD: EMPIRICAL BENCHMARK PROOF")
+    print("GOOGLE ANTIGRAVITY TOKEN OPTIMIZER: EMPIRICAL BENCHMARK PROOF")
     print(f"Tested Model  : {TESTED_MODEL}")
     print(f"Tested Runtime: {TESTED_RUNTIME}")
     print("=" * table_width)
@@ -248,7 +248,7 @@ def run_benchmark():
 
     export_payload = {
         "status": "success",
-        "benchmark_contract": "Google Antigravity Token Guard Proof",
+        "benchmark_contract": "Google Antigravity Token Optimizer Proof",
         "tested_model": TESTED_MODEL,
         "tested_runtime": TESTED_RUNTIME,
         "aggregates": {

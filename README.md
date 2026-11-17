@@ -1,12 +1,12 @@
-# Antigravity Token Guard
+# Antigravity Token Optimizer
 
-Google Antigravity Token Guard is a context engineering and prompt caching architecture designed specifically for the Google Antigravity IDE, AGY CLI, and Gemini backbone models. It enforces seven architectural invariants that eliminate prompt cache invalidation, protect coordinator context windows, and prevent terminal stream flooding.
+Google Antigravity Token Optimizer is a context engineering and prompt caching architecture designed specifically for the Google Antigravity IDE, AGY CLI, and Gemini backbone models. It enforces seven architectural invariants that eliminate prompt cache invalidation, protect coordinator context windows, and prevent terminal stream flooding.
 
 ## Executive Summary
 
 Unshielded Antigravity agent sessions rapidly burn millions of tokens. A standard 25-turn development run involving large builds, full-file inspections, and continuous polling routinely consumes over 1.35 million input tokens. All empirical benchmarks in this repository were measured against Gemini 3.8 Flash (gemini-3.8-flash) on the Google Antigravity runtime (v2.0). This rapid token consumption stems from compounding mechanics: dynamic prefix mutation breaking Gemini KV prompt caching, non-deterministic tool schema serialization mutating the prompt head, in-place prompt modifications invalidating prior context, unrestricted terminal output dumping tens of thousands of log lines into context, and busy-wait polling loops repeatedly resending conversation histories.
 
-By enforcing the 7 Antigravity Invariants, Antigravity Token Guard delivers an empirical 75.0% raw token reduction. Across a standard 25-turn workflow, Mode A consumes 1,352,000 cumulative input tokens across 25 turns with a 0.0% KV cache hit rate. Mode B consumes 338,000 total tokens with 260,000 cached tokens and 13,400 delta tokens, achieving a 75.0% raw token reduction and a 95.1% KV cache hit rate.
+By enforcing the 7 Antigravity Invariants, Antigravity Token Optimizer delivers an empirical 75.0% raw token reduction. Across a standard 25-turn workflow, Mode A consumes 1,352,000 cumulative input tokens across 25 turns with a 0.0% KV cache hit rate. Mode B consumes 338,000 total tokens with 260,000 cached tokens and 13,400 delta tokens, achieving a 75.0% raw token reduction and a 95.1% KV cache hit rate.
 
 ## Core Architecture: The Antigravity Prompt Caching Engine
 
@@ -21,7 +21,7 @@ However, if any dynamic variable (such as an ISO timestamp, a random session UUI
 
 Similarly, if tool declarations or schema definitions are registered in non-deterministic order (such as Python dictionary iteration order across versions or processes), the prompt prefix bytes change between turns and across sessions, forcing complete cache misses. In addition, in-place prompt mutation (such as altering the system prompt or mutating historical conversation turns when working directory or environment settings change) invalidates all KV cache blocks following the mutation point.
 
-Antigravity Token Guard enforces strict prefix invariance: system instructions, tool definitions, and behavioral contracts stay permanently static and leading. Tool schemas are deterministically sorted alphabetically by identifier name. Dynamic state updates are appended strictly to the tail of user turns. Command outputs are distilled through the Head-and-Tail Observation Pointer pattern.
+Antigravity Token Optimizer enforces strict prefix invariance: system instructions, tool definitions, and behavioral contracts stay permanently static and leading. Tool schemas are deterministically sorted alphabetically by identifier name. Dynamic state updates are appended strictly to the tail of user turns. Command outputs are distilled through the Head-and-Tail Observation Pointer pattern.
 
 ## The 7 Antigravity Invariants
 
@@ -43,7 +43,7 @@ The architecture enforces seven non-negotiable operational invariants across all
 
 ## Empirical Proof Section
 
-The token reductions and cache efficiency of Antigravity Token Guard are backed by reproducible empirical receipts measured against Gemini 3.8 Flash (gemini-3.8-flash) on the Google Antigravity runtime (v2.0).
+The token reductions and cache efficiency of Antigravity Token Optimizer are backed by reproducible empirical receipts measured against Gemini 3.8 Flash (gemini-3.8-flash) on the Google Antigravity runtime (v2.0).
 
 ### Proof 1: Real Antigravity Subagent Context Shielding Receipt
 During a comprehensive validation run, subagent c5d15edd absorbed 639 execution steps and 864,198 bytes of detailed execution trace in an isolated context window. This shielded the coordinator from absorbing 216,000 raw prompt tokens. The coordinator context stayed below 16,900 tokens across all 25 turns, maintaining fast reasoning cycles and preventing context degradation.
@@ -117,7 +117,7 @@ TOTAL 1,352,000       260,000         13,400        273,400                    9
 
 ## Setup and Usage
 
-Antigravity Token Guard rules can be deployed globally across all workspaces or per repository.
+Antigravity Token Optimizer rules can be deployed globally across all workspaces or per repository.
 
 ### Global Installation (Antigravity Environment)
 Copy the hardened rules file to your user configuration directory:
@@ -170,7 +170,7 @@ powershell -ExecutionPolicy Bypass -File examples/terminal_distillation_pattern.
 ## Repository Structure
 
 ```
-antigravity-token-guard/
+antigravity-token-optimizer/
 |-- .gitignore                             # Ignores scratch, logs, and python caches
 |-- LICENSE                                # MIT License
 |-- README.md                              # Technical documentation and empirical receipts

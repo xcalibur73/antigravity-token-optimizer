@@ -1,6 +1,6 @@
 {
   "status": "success",
-  "benchmark_contract": "Google Antigravity Token Guard Proof",
+  "benchmark_contract": "Google Antigravity Token Optimizer Proof",
   "tested_model": "Gemini 3.8 Flash (gemini-3.8-flash)",
   "tested_runtime": "Google Antigravity Engine (v2.0)",
   "aggregates": {
