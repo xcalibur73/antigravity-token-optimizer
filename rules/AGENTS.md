@@ -19,13 +19,13 @@ Coordinators must remain high-level orchestrators. Flooding coordinator context 
 3. Isolated Worker Execution: Subagents execute in isolated context windows. Heavy multi-turn trial loops run inside worker context, shielding the coordinator from prompt explosion.
 4. Structured Return Payload: Workers summarize their findings and return concise receipts through send_message. The coordinator ingests the summary without replaying intermediate worker tool traces.
 
-## 3. Terminal Stream Distillation
+## 3. Head-and-Tail Terminal Stream Distillation
 
 Raw terminal output from builds, test runners, and package managers often spans hundreds or thousands of lines. Flooding agent context with verbose terminal streams exhausts token quotas within minutes.
 
 1. Redirection Requirement: Any command expected to generate more than 30 lines of terminal output must redirect stdout and stderr to scratch/<task>.log.
-2. Tail and Filter Inspection: Inspect log files using targeted PowerShell commands, specifically Get-Content -Tail 30 or Select-String filters.
-3. Token Economy Target: Distill command feedback from 150,000 raw log tokens down to approximately 300 actionable tokens covering status, exit code, and terminal error traces.
+2. Head-and-Tail Observation Pointer Pattern: Construct prompt observations using the Head-and-Tail Pointer structure: capture the first 5 lines of output (initialization and command start), provide a clickable file pointer URI (file:///path/to/scratch/<task>.log) for full inspection, and capture the trailing 25 lines of output (final errors, exit state, and test summaries).
+3. Token Economy Target: Distill command feedback from 150,000 raw log tokens down to approximately 300 actionable tokens covering status, exit code, and terminal error traces without losing essential failure diagnostics.
 
 ## 4. Line-Bounded File Inspection
 
@@ -44,7 +44,23 @@ Antigravity subagents and background tasks run asynchronously. Coordinators must
 3. Mandatory Watchdog Deadline: To guard against hung workers or silent exits, arm a single global watchdog deadline before yielding: schedule(DurationSeconds=300..600, Prompt="Watchdog: task timed out", TimerCondition="never").
 4. Quorum and Teardown: When all subagents complete, cancel the active watchdog timer using manage_task(Action="kill", TaskId=<timer_id>) before continuing synthesis.
 
-## 6. Windows PowerShell Runtime Safety
+## 6. Deterministic Tool Schema Ordering
+
+Tool declarations and schemas are registered at the prompt head. Non-deterministic dictionary iteration or random registration ordering alters prefix byte sequences and causes Gemini KV cache misses.
+
+1. Alphabetical Sorting Requirement: Tool schemas, function declarations, and parameter definitions must be deterministically sorted alphabetically by identifier name prior to registration to ensure identical byte-for-byte prefix hashing.
+2. Schema Property Ordering: Parameter properties within each tool schema object must be serialized in alphabetical order by parameter key name to guarantee byte-for-byte prefix hash stability.
+3. Static Registration Order: Once sorted, tool definitions must remain in identical sequence across all turns and subagent invocations within the session.
+
+## 7. Append-Only State Updates
+
+Agent environments encounter dynamic changes such as directory navigation, credential refreshes, or configuration adjustments. Modifying earlier context turns destroys prefix caching.
+
+1. Zero In-Place Mutation: Never mutate historical conversation messages or system prompts in place when current working directory, permission sets, or environment flags change.
+2. Tail-Appended Runtime Deltas: Inject all state updates, working directory changes, and runtime notices strictly by appending a new turn at the conversation tail.
+3. Cache Stability Guarantee: Appending state changes to the tail preserves the entire leading KV cache prefix, allowing previous turn tokens to remain cached while only billing the newly appended state delta.
+
+## 8. Windows PowerShell Runtime Safety
 
 Windows environments require strict execution discipline to prevent encoding corruptions and quote escaping failures.
 
@@ -52,7 +68,7 @@ Windows environments require strict execution discipline to prevent encoding cor
 2. Zero Multi-Line Inline Python: Multi-line inline Python scripts executed via python -c in PowerShell cause escaping crashes. All execution scripts must be written to standalone Python files in scratch/ and executed directly.
 3. Explicit UTF-8 Encoding: Every Python file open, read, or write operation must explicitly declare encoding="utf-8" to prevent character corruption.
 
-## 7. Anti-Cheating and Code Quality Invariants
+## 9. Anti-Cheating and Code Quality Invariants
 
 1. Zero Assertion Dilution: Never weaken, relax, or broaden assertion thresholds or expected values just to force a failing test to pass. If an assertion fails, the implementation must be fixed, not the test contract.
 2. Zero Test Tampering: Never delete, skip, comment out, or bypass failing test cases or test files to fake a passing suite.

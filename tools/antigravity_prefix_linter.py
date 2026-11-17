@@ -2,8 +2,9 @@
 """Google Antigravity Prefix Linter.
 
 Audits Antigravity rules files, prompt configurations, and template headers
-for dynamic variables (timestamps, UUIDs, nonces, session identifiers) that
-invalidate Google Gemini KV cache prefix hashing.
+for dynamic variables (timestamps, UUIDs, nonces, session identifiers),
+unsorted tool schemas, and in-place prompt mutation patterns that invalidate
+Google Gemini KV cache prefix hashing.
 """
 
 import argparse
@@ -50,7 +51,140 @@ LINT_RULES = [
         "severity": "ERROR",
         "fix": "Prefix headers must remain identical across sessions for KV cache reuse.",
     },
+    {
+        "id": "IN_PLACE_PROMPT_MUTATION",
+        "description": "In-place system prompt or conversation history mutation pattern detected",
+        "regex": re.compile(
+            r"(?:set_system_prompt|update_system_prompt|replace_system_prompt|modify_system_prompt|mutate_system_prompt|reset_system_prompt|replace_system_message)\s*\("
+            r"|(?:\.system_prompt|\.system_instruction)\s*=(?!=)"
+            r"|(?:messages|history|conversation)\[0\](?:\s*\[['\"][^'\"]+['\"]\])?\s*=(?!=)"
+            r"|(?:system_prompt|system_instruction)\.(?:replace|format|update)\s*\(",
+            re.IGNORECASE,
+        ),
+        "severity": "ERROR",
+        "fix": "Never mutate system prompts or prior turns in place. Append runtime state updates to conversation tail.",
+    },
 ]
+
+
+def check_tool_ordering(file_path, lines, text):
+    """Scan file content for unsorted tool declarations or tool schemas."""
+    violations = []
+    path_obj = Path(file_path)
+
+    # 1. Direct JSON check for tool arrays
+    if path_obj.suffix.lower() == ".json":
+        try:
+            data = json.loads(text)
+            tool_lists = []
+            if isinstance(data, dict):
+                for k in ["tools", "function_declarations", "functions"]:
+                    if k in data and isinstance(data[k], list):
+                        tool_lists.append(data[k])
+            elif isinstance(data, list):
+                tool_lists.append(data)
+
+            for t_list in tool_lists:
+                names = []
+                for item in t_list:
+                    if isinstance(item, dict):
+                        name = item.get("name") or item.get("function", {}).get("name") or item.get("tool", {}).get("name")
+                        if name:
+                            names.append(str(name))
+                    elif isinstance(item, str):
+                        names.append(item)
+
+                if len(names) >= 2:
+                    for i in range(len(names) - 1):
+                        if names[i].lower() > names[i + 1].lower():
+                            offending_line = 1
+                            for idx, line in enumerate(lines, start=1):
+                                if names[i + 1] in line:
+                                    offending_line = idx
+                                    break
+                            violations.append({
+                                "file": str(file_path),
+                                "line": offending_line,
+                                "rule": "UNSORTED_TOOL_DEFINITIONS",
+                                "matched": f"{names[i]} before {names[i + 1]}",
+                                "line_text": lines[offending_line - 1].strip()[:120],
+                                "message": f"Tool definitions must be sorted alphabetically by identifier name. Found '{names[i]}' before '{names[i + 1]}'.",
+                                "severity": "ERROR",
+                                "fix": "Sort tool schemas, function declarations, and parameter definitions alphabetically prior to registration.",
+                            })
+                            break
+        except Exception:
+            pass
+
+    # 2. Pattern check for code blocks, YAML, Python, Markdown: tools = [ ... ], function_declarations = [ ... ]
+    tool_block_pattern = re.compile(
+        r"(?:tools|function_declarations|functions)\s*(?:=|:)\s*\[([^\]]+)\]",
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in tool_block_pattern.finditer(text):
+        match_str = match.group(0)
+        if path_obj.suffix.lower() == ".py" and ("re.compile" in match_str or "pattern" in match_str or "tool_block_pattern" in match_str):
+            continue
+
+        block_content = match.group(1)
+        names = []
+        name_dict_matches = re.findall(r"['\"]name['\"]\s*:\s*['\"]([^'\"]+)['\"]", block_content)
+        if name_dict_matches:
+            names = name_dict_matches
+        else:
+            str_matches = re.findall(r"['\"]([a-zA-Z0-9_-]+)['\"]", block_content)
+            if str_matches:
+                names = str_matches
+            else:
+                ident_matches = re.findall(r"\b([a-zA-Z0-9_]+)\b", block_content)
+                names = [m for m in ident_matches if m not in {"tools", "function_declarations", "functions", "None", "True", "False"}]
+
+        if len(names) >= 2:
+            for i in range(len(names) - 1):
+                if names[i].lower() > names[i + 1].lower():
+                    start_char = match.start()
+                    line_no = text[:start_char].count("\n") + 1
+                    for idx, line in enumerate(lines[line_no - 1:], start=line_no):
+                        if names[i + 1] in line:
+                            line_no = idx
+                            break
+                    violations.append({
+                        "file": str(file_path),
+                        "line": line_no,
+                        "rule": "UNSORTED_TOOL_DEFINITIONS",
+                        "matched": f"{names[i]} before {names[i + 1]}",
+                        "line_text": lines[line_no - 1].strip()[:120] if line_no <= len(lines) else "",
+                        "message": f"Tool definitions must be sorted alphabetically by identifier name. Found '{names[i]}' before '{names[i + 1]}'.",
+                        "severity": "ERROR",
+                        "fix": "Sort tool schemas, function declarations, and parameter definitions alphabetically prior to registration.",
+                    })
+                    break
+
+    # 3. YAML list pattern:
+    yaml_tool_pattern = re.compile(
+        r"^(?:tools|function_declarations|functions)\s*:\s*\n((?:\s*-\s+.*?\n)+)",
+        re.IGNORECASE | re.MULTILINE,
+    )
+    for match in yaml_tool_pattern.finditer(text):
+        yaml_block = match.group(1)
+        names = re.findall(r"-\s+(?:name:\s*)?['\"]?([a-zA-Z0-9_-]+)['\"]?", yaml_block)
+        if len(names) >= 2:
+            for i in range(len(names) - 1):
+                if names[i].lower() > names[i + 1].lower():
+                    line_no = text[:match.start()].count("\n") + 1
+                    violations.append({
+                        "file": str(file_path),
+                        "line": line_no,
+                        "rule": "UNSORTED_TOOL_DEFINITIONS",
+                        "matched": f"{names[i]} before {names[i + 1]}",
+                        "line_text": lines[line_no - 1].strip()[:120] if line_no <= len(lines) else "",
+                        "message": f"Tool definitions must be sorted alphabetically by identifier name. Found '{names[i]}' before '{names[i + 1]}'.",
+                        "severity": "ERROR",
+                        "fix": "Sort tool schemas, function declarations, and parameter definitions alphabetically prior to registration.",
+                    })
+                    break
+
+    return violations
 
 
 def check_file(file_path, strict=False):
@@ -67,13 +201,15 @@ def check_file(file_path, strict=False):
     except Exception as exc:
         return [{"file": str(file_path), "line": 0, "rule": "READ_ERROR", "message": str(exc), "severity": "ERROR"}]
 
+    full_text = "".join(lines)
+    is_python_source = path_obj.suffix.lower() == ".py"
+
     for line_idx, line in enumerate(lines, start=1):
         stripped = line.strip()
         # Skip comment lines that document rules rather than defining prompt prefixes
         if stripped.startswith("#") and "Google Antigravity" in stripped:
             continue
 
-        is_python_source = path_obj.suffix.lower() == ".py"
         for rule in LINT_RULES:
             match = rule["regex"].search(line)
             if match:
@@ -91,6 +227,10 @@ def check_file(file_path, strict=False):
                     "severity": severity,
                     "fix": rule["fix"],
                 })
+
+    # Check for unsorted tool definitions across JSON, YAML, or code blocks
+    tool_violations = check_tool_ordering(file_path, lines, full_text)
+    violations.extend(tool_violations)
 
     return violations
 
