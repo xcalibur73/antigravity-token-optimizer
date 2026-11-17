@@ -1,5 +1,5 @@
 # Google Antigravity Terminal Stream Distillation Pattern
-# Demonstrates safe output redirection and tail filtering in PowerShell.
+# Demonstrates safe output redirection and head-and-tail pointer filtering in PowerShell.
 # Prevents flooding the agent context with thousands of lines of terminal output.
 
 [CmdletBinding()]
@@ -39,26 +39,36 @@ if ($null -eq $ExitCode) {
 Write-Host "[2/3] Stream captured to: $LogFile"
 $TotalLines = (Get-Content -Path $LogFile | Measure-Object -Line).Lines
 
-# Distill output: Extract only the tail 30 lines
-Write-Host "[3/3] Distilling terminal output to tail 30 lines..."
-$DistilledOutput = Get-Content -Path $LogFile -Tail 30
+# Distill output: Head-and-Tail Pointer Pattern (Top 5 lines + File Pointer URI + Bottom 25 lines)
+Write-Host "[3/3] Distilling terminal output (Head-and-Tail Pointer pattern)..."
+$HeadLines = Get-Content -Path $LogFile -TotalCount 5
+$TailLines = Get-Content -Path $LogFile -Tail 25
+$FullLogPath = (Resolve-Path -Path $LogFile).Path
+$FileUri = "file:///$($FullLogPath -replace '\\', '/')"
 
 Write-Host "------------------------------------------------------------"
-Write-Host "Distilled Output Sample for Agent Context:"
+Write-Host "Distilled Context Block for Agent Prompt:"
 Write-Host "------------------------------------------------------------"
-$DistilledOutput | Select-Object -Last 5 | ForEach-Object { Write-Host $_ }
+Write-Host "[HEAD: Initialization parameters and command start]"
+$HeadLines | ForEach-Object { Write-Host "  $_" }
+Write-Host ""
+Write-Host "[TRUNCATED: Full raw log available at: $FileUri]"
+Write-Host ""
+Write-Host "[TAIL: Final errors, test summaries, and exit state]"
+$TailLines | ForEach-Object { Write-Host "  $_" }
 Write-Host "------------------------------------------------------------"
 
 # Compute token economy metrics
 $RawTokenEstimate = [int]($TotalLines * 7.5)
-$DistilledLines = ($DistilledOutput | Measure-Object -Line).Lines
-$DistilledTokenEstimate = [int]($DistilledLines * 7.5)
+$DistilledLineCount = $HeadLines.Count + $TailLines.Count + 3
+$DistilledTokenEstimate = [int]($DistilledLineCount * 7.5)
 $TokenSavingsPercent = [math]::Round(((1 - ($DistilledTokenEstimate / $RawTokenEstimate)) * 100), 1)
 
 Write-Host "Token Economy Summary:"
 Write-Host "  Raw Output Lines: $TotalLines lines (~$RawTokenEstimate tokens)"
-Write-Host "  Distilled Context Lines: $DistilledLines lines (~$DistilledTokenEstimate tokens)"
+Write-Host "  Distilled Context Lines: $DistilledLineCount lines (~$DistilledTokenEstimate tokens)"
 Write-Host "  Context Footprint Reduction: $TokenSavingsPercent%"
+Write-Host "  Full Log Pointer: $FileUri"
 Write-Host "  Exit Code: $ExitCode"
 Write-Host "============================================================"
 
