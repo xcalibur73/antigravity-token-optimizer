@@ -84,6 +84,7 @@ class TestTranscriptAnalyzer(unittest.TestCase):
                 [sys.executable, script, str(path), "--json"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res.returncode, 0)
             payload = json.loads(res.stdout)

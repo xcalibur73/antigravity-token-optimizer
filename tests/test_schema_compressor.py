@@ -260,6 +260,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--check"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res.returncode, 1)
             self.assertIn("FAIL", res.stderr)
@@ -287,6 +288,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--check"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res.returncode, 0)
             self.assertIn("PASS", res.stderr)
@@ -311,6 +313,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--in-place"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res.returncode, 0)
 
@@ -325,6 +328,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--check"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res_check.returncode, 0)
         finally:
@@ -348,6 +352,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--in-place", "--condense-descriptions"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res.returncode, 0)
 
@@ -370,6 +375,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--minify"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res.returncode, 0)
             self.assertNotIn("\n", res.stdout.strip())
@@ -409,6 +415,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--check"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res_fail.returncode, 1)
 
@@ -416,6 +423,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--in-place"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res_fix.returncode, 0)
 
@@ -423,6 +431,7 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 [sys.executable, self.script_path, "--input", temp_path, "--check"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
             )
             self.assertEqual(res_pass.returncode, 0)
         finally:

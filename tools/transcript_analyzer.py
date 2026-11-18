@@ -113,7 +113,10 @@ def discover_transcripts(home_dir: Path | None = None, limit: int = 20) -> list[
         if not brain_root.is_dir():
             continue
         try:
-            for log_path in brain_root.rglob("transcript.jsonl"):
+            for root, _dirs, files in os.walk(brain_root, followlinks=True):
+                if "transcript.jsonl" not in files:
+                    continue
+                log_path = Path(root) / "transcript.jsonl"
                 if log_path.parent.name != "logs" or log_path.parent.parent.name != ".system_generated":
                     continue
                 if not log_path.is_file():

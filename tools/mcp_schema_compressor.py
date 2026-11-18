@@ -288,7 +288,10 @@ def main():
         if args.in_place:
             sys.stderr.write("Error: --in-place requires a file path via --input.\n")
             sys.exit(1)
-        raw_text = sys.stdin.read()
+        if hasattr(sys.stdin, "buffer"):
+            raw_text = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace")
+        else:
+            raw_text = sys.stdin.read()
 
     if not raw_text.strip():
         sys.stderr.write("Error: Empty input provided.\n")

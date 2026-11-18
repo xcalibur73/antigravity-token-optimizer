@@ -55,6 +55,7 @@ class TestRepoConsistency(unittest.TestCase):
             [sys.executable, linter, str(REPO_ROOT), "--strict"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual(res.returncode, 0, f"Prefix linter failed on repo:\n{res.stdout}\n{res.stderr}")
 

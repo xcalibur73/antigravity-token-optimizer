@@ -105,6 +105,7 @@ class TestPreToolHook(unittest.TestCase):
             input=payload,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         self.assertEqual(res_deny.returncode, 0)
         self.assertEqual(json.loads(res_deny.stdout)["decision"], "deny")
@@ -116,6 +117,7 @@ class TestPreToolHook(unittest.TestCase):
             input=payload,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
         )
         self.assertEqual(res_bypass.returncode, 0)

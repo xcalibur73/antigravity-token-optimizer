@@ -261,7 +261,10 @@ def evaluate_tool_call(payload: dict) -> dict:
 
 def main():
     try:
-        raw = sys.stdin.read()
+        if hasattr(sys.stdin, "buffer"):
+            raw = sys.stdin.buffer.read().decode("utf-8-sig", errors="replace")
+        else:
+            raw = sys.stdin.read()
         if raw.startswith("\ufeff"):
             raw = raw.lstrip("\ufeff")
         payload = json.loads(raw) if raw.strip() else {}
