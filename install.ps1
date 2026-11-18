@@ -59,7 +59,7 @@ Raw terminal output from builds, test runners, and package managers often spans 
 
 Reading entire source files into context wastes input bandwidth and evicts relevant instructions from prompt attention.
 
-1. Bounded Chunk Size: Always pass StartLine and EndLine when inspecting files exceeding 150 lines. Restrict inspection windows to at most 150 lines per tool call.
+1. Bounded Chunk Size: Always pass `StartLine` and `EndLine` (or equivalent line-range flags) when inspecting files exceeding 150 lines. Restrict inspection windows to at most 150 lines per tool call.
 2. Target Verification: Identify line targets using search tools or structural references before issuing targeted read calls.
 3. Full-File Exemption: Full-file inspection is permitted only when executing complete structural rewrites of compact modules under 150 lines.
 
@@ -67,10 +67,10 @@ Reading entire source files into context wastes input bandwidth and evicts relev
 
 Antigravity subagents and background tasks run asynchronously. Coordinators must never run busy-wait polling loops.
 
-1. Zero Busy-Wait Polling: Coordinators must never issue repeated status polling calls (such as polling manage_subagents every few seconds) or tail transcript files during wait intervals.
-2. Mechanical Turn Yield: Immediately after dispatching subagents or background tasks, the coordinator must yield execution with zero tool calls. Antigravity resumes execution reactively when send_message delivers incoming payloads.
-3. Mandatory Watchdog Deadline: To guard against hung workers or silent exits, arm a single global watchdog deadline before yielding: schedule(DurationSeconds=300..600, Prompt="Watchdog: subagents timed out", TimerCondition="never"). Incremental completions wake the coordinator reactively without cancelling the timer.
-4. Quorum Teardown Protocol: When all subagents complete, cancel the watchdog deadline with manage_task(Action="kill", TaskId=<timer_task_id>) before synthesizing outcomes.
+1. Zero Busy-Wait Polling: Coordinators must never issue repeated status polling calls (such as polling `manage_subagents` or `manage_task` every few seconds) or tail transcript files during wait intervals.
+2. Mechanical Turn Yield: Immediately after dispatching subagents or background tasks, the coordinator must yield execution with zero tool calls (`tool_calls: []`). Antigravity resumes execution reactively when `send_message` or a task completion notification arrives.
+3. Mandatory Watchdog Deadline: In runtimes that provide a `schedule` tool, arm a single global watchdog deadline before yielding: `schedule(DurationSeconds=300..600, Prompt="Watchdog: task timed out", TimerCondition="never")`. In runtimes without `schedule`, set `NotificationTimeoutSeconds` on background tasks or rely on native reactive task-completion wakeups.
+4. Quorum and Teardown: When all subagents complete, cancel any active watchdog timer using `manage_task(Action="kill", TaskId=<timer_id>)` before continuing synthesis.
 
 ## 6. Deterministic Tool Schema Ordering
 
@@ -88,13 +88,13 @@ Agent environments encounter dynamic changes such as directory navigation, crede
 2. Tail-Appended Runtime Deltas: Inject all state updates, working directory changes, and runtime notices strictly by appending a new turn at the conversation tail.
 3. Cache Stability Guarantee: Appending state changes to the tail preserves the entire leading KV cache prefix, allowing previous turn tokens to remain cached while only billing the newly appended state delta.
 
-## 8. Windows PowerShell Runtime Safety
+## 8. Cross-Platform Shell and Runtime Safety
 
-Windows environments require strict execution discipline to prevent encoding corruptions and quote escaping failures.
+Multi-platform agent environments (Windows PowerShell, Linux bash, macOS zsh) require strict execution discipline to prevent encoding corruptions, working-directory drift, and shell-escaping failures.
 
-1. Zero Shell CD Commands: Never run cd in terminal calls. Always specify absolute paths or explicit working directories.
-2. Zero Multi-Line Inline Python: Multi-line inline Python scripts executed via python -c in PowerShell cause escaping crashes. All execution scripts must be written to standalone Python files in scratch/ and executed directly.
-3. Explicit UTF-8 Encoding: Every Python file open, read, or write operation must explicitly declare encoding="utf-8" to prevent character corruption.
+1. Zero Shell `cd` Commands: Never rely on stateful `cd` chains in terminal calls. Always specify explicit `Cwd` parameters or absolute paths.
+2. Zero Multi-Line Inline Scripts in PowerShell: Multi-line inline Python scripts executed via `python -c` in Windows PowerShell cause quote-escaping failures. Write multi-line scripts to standalone files in `scratch/` and execute them directly.
+3. Explicit UTF-8 Encoding: Every Python file open, read, or write operation must explicitly declare `encoding="utf-8"` to prevent platform-dependent encoding corruption.
 
 ## 9. Anti-Cheating and Code Quality Invariants
 

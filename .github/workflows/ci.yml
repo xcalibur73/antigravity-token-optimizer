@@ -26,10 +26,17 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Run unit test suite
-        run: python -m unittest discover tests
+        run: python -m unittest discover -s tests -v
 
-      - name: Run prefix linter audit
-        run: python tools/antigravity_prefix_linter.py rules/AGENTS.md
+      - name: Run prefix linter audit across repository
+        run: python tools/antigravity_prefix_linter.py . --strict
+
+      - name: Verify analytical simulation runs cleanly
+        run: python proof/benchmark_proof.py
+
+      - name: Test POSIX installer (dry-run)
+        if: runner.os != 'Windows'
+        run: bash install.sh --dry-run
 
       - name: Test Windows PowerShell installer (dry-run)
         if: runner.os == 'Windows'

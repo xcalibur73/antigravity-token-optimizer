@@ -59,13 +59,13 @@ class TestPrefixLinterCleanRules(unittest.TestCase):
         """Verify deterministically sorted JSON tools pass without violations."""
         tools_data = {
             "tools": [
-                {"name": "alpha_tool", "description": "First tool."},
-                {"name": "beta_tool", "description": "Second tool."},
-                {"name": "gamma_tool", "description": "Third tool."},
+                {"description": "First tool.", "name": "alpha_tool"},
+                {"description": "Second tool.", "name": "beta_tool"},
+                {"description": "Third tool.", "name": "gamma_tool"},
             ]
         }
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
-            f.write(json.dumps(tools_data, indent=2))
+            f.write(json.dumps(tools_data, indent=2, sort_keys=True))
             temp_path = f.name
 
         try:
@@ -192,6 +192,73 @@ class TestPrefixLinterEvasionAttempts(unittest.TestCase):
             "```\n"
         )
         self._assert_violation(markdown_content, "UNSORTED_TOOL_DEFINITIONS", suffix=".md")
+
+    def test_nested_bracket_tools_block_detection(self):
+        """Ensure nested lists like required=['a'] inside tools=[...] do not truncate matching."""
+        py_content = (
+            "tools = [\n"
+            "    {'name': 'zeta_tool', 'required': ['b', 'a']},\n"
+            "    {'name': 'alpha_tool', 'required': ['x']},\n"
+            "]\n"
+        )
+        self._assert_violation(py_content, "UNSORTED_TOOL_DEFINITIONS", suffix=".py")
+
+    def test_unsorted_json_schema_keys_detection(self):
+        """Ensure unsorted keys inside JSON tool schemas trigger UNSORTED_SCHEMA_KEYS."""
+        unsorted_schema = {
+            "tools": [
+                {
+                    "name": "alpha_tool",
+                    "description": "First.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "zeta": {"type": "string"},
+                            "alpha": {"type": "string"},
+                        },
+                        "required": ["zeta", "alpha"],
+                    },
+                }
+            ]
+        }
+        self._assert_violation(json.dumps(unsorted_schema, indent=2), "UNSORTED_SCHEMA_KEYS", suffix=".json")
+
+    def test_dynamic_tail_marker_allows_tail_metadata(self):
+        """Variables placed after <!-- DYNAMIC_TAIL --> must not violate prefix invariance."""
+        content = (
+            "# Static System Prefix\n"
+            "Always keep rules deterministic.\n"
+            "<!-- DYNAMIC_TAIL -->\n"
+            "Current request time: {{ timestamp }}\n"
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            violations = check_file(temp_path, strict=True)
+            self.assertEqual(violations, [])
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_inline_ignore_suppression_and_def_not_flagged(self):
+        """Function defs named *set_system_prompt and inline ignore comments must not error."""
+        content = (
+            "def test_helper_set_system_prompt(self):\n"
+            "    pass\n"
+            "ts = datetime.now()  # prefix-linter: ignore\n"
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            violations = check_file(temp_path, strict=True)
+            self.assertEqual(violations, [])
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
 
 if __name__ == "__main__":

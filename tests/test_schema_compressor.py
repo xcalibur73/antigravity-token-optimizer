@@ -163,6 +163,41 @@ class TestSchemaCompressorDocstrings(unittest.TestCase):
         self.assertNotIn("*", condensed)
         self.assertNotIn("`", condensed)
 
+    def test_preserve_multi_value_allowed_constraint(self):
+        desc = "Select operational mode. Allowed values are read, write, admin."
+        condensed = condense_description(desc)
+        self.assertEqual(condensed, "Select operational mode (Allowed: read, write, admin).")
+
+    def test_lossless_default_preserves_multi_sentence_descriptions_and_non_tool_lists(self):
+        schema = {
+            "tools": [
+                {
+                    "name": "z_tool",
+                    "description": "Primary action. Never call without confirming backup.",
+                    "examples": [],
+                },
+                {
+                    "name": "a_tool",
+                    "description": "Secondary action. Requires UTF-8 input.",
+                },
+            ],
+            "workflow_steps": [
+                {"name": "step_two", "order": 2},
+                {"name": "step_one", "order": 1},
+            ],
+        }
+        compressed = compress_schema(schema)
+        self.assertEqual([t["name"] for t in compressed["tools"]], ["a_tool", "z_tool"])
+        self.assertEqual(
+            compressed["tools"][1]["description"],
+            "Primary action. Never call without confirming backup.",
+        )
+        # Non-tool ordered arrays must not be sorted
+        self.assertEqual(
+            [s["name"] for s in compressed["workflow_steps"]],
+            ["step_two", "step_one"],
+        )
+
 
 class TestSchemaCompressorPruning(unittest.TestCase):
     """Test suite for pruning nulls, boilerplate schemas, and redundant fields."""
@@ -260,10 +295,10 @@ class TestSchemaCompressorCLI(unittest.TestCase):
                 os.unlink(temp_path)
 
     def test_cli_in_place_compression(self):
-        """CLI with --in-place must rewrite file with compressed content."""
+        """CLI with --in-place must rewrite file losslessly by default."""
         uncompressed = {
             "tools": [
-                {"name": "zebra", "description": "This tool is used to run zebra."},
+                {"name": "zebra", "description": "This tool is used to run zebra. Keep backup."},
                 {"name": "alpha", "description": "Run alpha."},
             ]
         }
@@ -279,21 +314,46 @@ class TestSchemaCompressorCLI(unittest.TestCase):
             )
             self.assertEqual(res.returncode, 0)
 
-            # Re-read file
             with open(temp_path, "r", encoding="utf-8") as f:
                 content = f.read()
             data = json.loads(content)
             names = [t["name"] for t in data["tools"]]
             self.assertEqual(names, ["alpha", "zebra"])
-            self.assertEqual(data["tools"][1]["description"], "Run zebra.")
+            self.assertEqual(data["tools"][1]["description"], "This tool is used to run zebra. Keep backup.")
 
-            # Second run with --check should pass
             res_check = subprocess.run(
                 [sys.executable, self.script_path, "--input", temp_path, "--check"],
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(res_check.returncode, 0)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_cli_condense_descriptions_flag(self):
+        """CLI with --condense-descriptions must condense verbose preambles."""
+        uncompressed = {
+            "tools": [
+                {"name": "zebra", "description": "This tool is used to run zebra."},
+                {"name": "alpha", "description": "Run alpha."},
+            ]
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            f.write(json.dumps(uncompressed, indent=4))
+            temp_path = f.name
+
+        try:
+            res = subprocess.run(
+                [sys.executable, self.script_path, "--input", temp_path, "--in-place", "--condense-descriptions"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0)
+
+            with open(temp_path, "r", encoding="utf-8") as f:
+                data = json.loads(f.read())
+            self.assertEqual(data["tools"][1]["description"], "Run zebra.")
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)

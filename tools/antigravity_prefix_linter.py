@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Google Antigravity Prefix Linter.
 
-Audits Antigravity rules files, prompt configurations, and template headers
-for dynamic variables (timestamps, UUIDs, nonces, session identifiers),
-unsorted tool schemas, and in-place prompt mutation patterns that invalidate
-Google Gemini KV cache prefix hashing.
+Audits Antigravity rules files, prompt configurations, tool schemas, and template
+headers for dynamic variables (timestamps, UUIDs, nonces, session identifiers),
+unsorted tool schemas or schema keys, and in-place prompt mutation patterns that
+invalidate Google Gemini KV cache prefix hashing.
 """
 
 import argparse
@@ -14,12 +14,24 @@ import re
 import sys
 from pathlib import Path
 
+TAIL_MARKER_PATTERN = re.compile(
+    r"(?:<!--\s*(?:DYNAMIC_TAIL|USER_TURN_TAIL)\s*-->|#\s*DYNAMIC_TAIL\b)",
+    re.IGNORECASE,
+)
+
+INLINE_IGNORE_PATTERN = re.compile(
+    r"(?:#|//|<!--)\s*prefix-linter:\s*ignore\b",
+    re.IGNORECASE,
+)
 
 LINT_RULES = [
     {
         "id": "DYNAMIC_INTERPOLATION",
         "description": "Dynamic template interpolation in prompt prefix",
-        "regex": re.compile(r"{{\s*(?:timestamp|date|time|now|uuid|session_id|request_id|nonce)\s*}}", re.IGNORECASE),
+        "regex": re.compile(
+            r"{{\s*(?:timestamp|date|time|now|uuid|session_id|request_id|nonce)\s*}}",
+            re.IGNORECASE,
+        ),
         "severity": "ERROR",
         "fix": "Move dynamic variables from system prompt prefix to the tail of user turns.",
     },
@@ -33,21 +45,28 @@ LINT_RULES = [
     {
         "id": "LITERAL_ISO_TIMESTAMP",
         "description": "Literal ISO 8601 timestamp in prefix header",
-        "regex": re.compile(r"\b202[0-9]-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9](?:\.\d+)?(?:Z|[+-][0-2][0-9]:?[0-5][0-9])?\b"),
+        "regex": re.compile(
+            r"\b202[0-9]-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9](?:\.\d+)?(?:Z|[+-][0-2][0-9]:?[0-5][0-9])?\b"
+        ),
         "severity": "ERROR",
         "fix": "Remove dynamic timestamps from static prefixes. Relocate to user turn footer.",
     },
     {
         "id": "LITERAL_UUID",
         "description": "Literal UUID found in prefix content",
-        "regex": re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"),
+        "regex": re.compile(
+            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+        ),
         "severity": "WARNING",
         "fix": "Use static identifiers in prompt templates. Place ephemeral UUIDs at user message tail.",
     },
     {
         "id": "DYNAMIC_SESSION_ASSIGNMENT",
         "description": "Dynamic session or request parameter in prefix",
-        "regex": re.compile(r"(?:session_id|request_id|turn_nonce|client_nonce)\s*=\s*['\"][^'\"]+['\"]", re.IGNORECASE),
+        "regex": re.compile(
+            r"(?:session_id|request_id|turn_nonce|client_nonce)\s*=\s*['\"][^'\"]+['\"]",
+            re.IGNORECASE,
+        ),
         "severity": "ERROR",
         "fix": "Prefix headers must remain identical across sessions for KV cache reuse.",
     },
@@ -55,10 +74,10 @@ LINT_RULES = [
         "id": "IN_PLACE_PROMPT_MUTATION",
         "description": "In-place system prompt or conversation history mutation pattern detected",
         "regex": re.compile(
-            r"(?:set_system_prompt|update_system_prompt|replace_system_prompt|modify_system_prompt|mutate_system_prompt|reset_system_prompt|replace_system_message)\s*\("
+            r"(?:(?<!def\s)\b(?:set_system_prompt|update_system_prompt|replace_system_prompt|modify_system_prompt|mutate_system_prompt|reset_system_prompt|replace_system_message)\s*\("
             r"|(?:\.system_prompt|\.system_instruction)\s*=(?!=)"
-            r"|(?:messages|history|conversation)\[0\](?:\s*\[['\"][^'\"]+['\"]\])?\s*=(?!=)"
-            r"|(?:system_prompt|system_instruction)\.(?:replace|format|update)\s*\(",
+            r"|\b(?:messages|history|conversation)\[0\](?:\s*\[['\"][^'\"]+['\"]\])?\s*=(?!=)"
+            r"|\b(?:system_prompt|system_instruction)\.(?:replace|format|update)\s*\()",
             re.IGNORECASE,
         ),
         "severity": "ERROR",
@@ -67,12 +86,108 @@ LINT_RULES = [
 ]
 
 
+def _find_line_for_token(lines, token, start_line=1):
+    """Locate the first line number (>= start_line) containing token."""
+    for idx, line in enumerate(lines[start_line - 1:], start=start_line):
+        if token in line:
+            return idx
+    return start_line
+
+
+def _extract_balanced_bracket_blocks(text):
+    """Extract balanced `[...]` blocks preceded by tools/function_declarations/functions assignment."""
+    header_re = re.compile(
+        r"\b(?:tools|function_declarations|functions)\s*(?:=|:)\s*\[",
+        re.IGNORECASE,
+    )
+    blocks = []
+    for match in header_re.finditer(text):
+        open_idx = match.end() - 1
+        depth = 0
+        in_string = None
+        escaped = False
+        end_idx = None
+
+        for pos in range(open_idx, len(text)):
+            ch = text[pos]
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\" and in_string is not None:
+                escaped = True
+                continue
+            if in_string is not None:
+                if ch == in_string:
+                    in_string = None
+                continue
+            if ch in ('"', "'"):
+                in_string = ch
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    end_idx = pos
+                    break
+
+        if end_idx is not None:
+            blocks.append((match.start(), text[open_idx + 1 : end_idx], text[match.start() : end_idx + 1]))
+    return blocks
+
+
+def _check_json_dict_key_ordering(node, file_path, lines, violations, is_schema_context=False):
+    """Recursively verify alphabetical key ordering inside tool schema objects."""
+    if isinstance(node, dict):
+        keys = list(node.keys())
+        schema_context = is_schema_context or any(
+            k in node for k in ("tools", "function_declarations", "functions", "inputSchema", "parameters", "properties")
+        )
+        if schema_context and len(keys) >= 2:
+            sorted_keys = sorted(keys)
+            if keys != sorted_keys:
+                for i in range(len(keys) - 1):
+                    if keys[i] > keys[i + 1]:
+                        line_no = _find_line_for_token(lines, f'"{keys[i + 1]}"')
+                        violations.append({
+                            "file": str(file_path),
+                            "line": line_no,
+                            "rule": "UNSORTED_SCHEMA_KEYS",
+                            "matched": f"{keys[i]} before {keys[i + 1]}",
+                            "line_text": lines[line_no - 1].strip()[:120] if line_no <= len(lines) else "",
+                            "message": f"Schema object keys must be sorted alphabetically. Found '{keys[i]}' before '{keys[i + 1]}'.",
+                            "severity": "ERROR",
+                            "fix": "Run tools/mcp_schema_compressor.py to sort schema keys and tool declarations deterministically.",
+                        })
+                        break
+        for k, v in node.items():
+            if k == "required" and isinstance(v, list) and all(isinstance(x, str) for x in v) and len(v) >= 2:
+                if v != sorted(v):
+                    for i in range(len(v) - 1):
+                        if v[i] > v[i + 1]:
+                            line_no = _find_line_for_token(lines, f'"{v[i + 1]}"')
+                            violations.append({
+                                "file": str(file_path),
+                                "line": line_no,
+                                "rule": "UNSORTED_SCHEMA_KEYS",
+                                "matched": f"{v[i]} before {v[i + 1]}",
+                                "line_text": lines[line_no - 1].strip()[:120] if line_no <= len(lines) else "",
+                                "message": f"Required parameter array must be sorted alphabetically. Found '{v[i]}' before '{v[i + 1]}'.",
+                                "severity": "ERROR",
+                                "fix": "Sort required parameter arrays alphabetically.",
+                            })
+                            break
+            _check_json_dict_key_ordering(v, file_path, lines, violations, is_schema_context=schema_context)
+    elif isinstance(node, list):
+        for item in node:
+            _check_json_dict_key_ordering(item, file_path, lines, violations, is_schema_context=is_schema_context)
+
+
 def check_tool_ordering(file_path, lines, text):
     """Scan file content for unsorted tool declarations or tool schemas."""
     violations = []
     path_obj = Path(file_path)
 
-    # 1. Direct JSON check for tool arrays
+    # 1. Direct JSON check for tool arrays and schema key ordering
     if path_obj.suffix.lower() == ".json":
         try:
             data = json.loads(text)
@@ -88,7 +203,11 @@ def check_tool_ordering(file_path, lines, text):
                 names = []
                 for item in t_list:
                     if isinstance(item, dict):
-                        name = item.get("name") or item.get("function", {}).get("name") or item.get("tool", {}).get("name")
+                        name = (
+                            item.get("name")
+                            or (item.get("function", {}).get("name") if isinstance(item.get("function"), dict) else None)
+                            or (item.get("tool", {}).get("name") if isinstance(item.get("tool"), dict) else None)
+                        )
                         if name:
                             names.append(str(name))
                     elif isinstance(item, str):
@@ -96,12 +215,8 @@ def check_tool_ordering(file_path, lines, text):
 
                 if len(names) >= 2:
                     for i in range(len(names) - 1):
-                        if names[i].lower() > names[i + 1].lower():
-                            offending_line = 1
-                            for idx, line in enumerate(lines, start=1):
-                                if names[i + 1] in line:
-                                    offending_line = idx
-                                    break
+                        if (names[i].lower(), names[i]) > (names[i + 1].lower(), names[i + 1]):
+                            offending_line = _find_line_for_token(lines, names[i + 1])
                             violations.append({
                                 "file": str(file_path),
                                 "line": offending_line,
@@ -113,20 +228,19 @@ def check_tool_ordering(file_path, lines, text):
                                 "fix": "Sort tool schemas, function declarations, and parameter definitions alphabetically prior to registration.",
                             })
                             break
+
+            # Enforce nested schema key & required array sorting on tool schema JSON files
+            if tool_lists or (isinstance(data, dict) and ("inputSchema" in data or "properties" in data)):
+                _check_json_dict_key_ordering(data, file_path, lines, violations)
+            return violations
         except Exception:
             pass
 
-    # 2. Pattern check for code blocks, YAML, Python, Markdown: tools = [ ... ], function_declarations = [ ... ]
-    tool_block_pattern = re.compile(
-        r"(?:tools|function_declarations|functions)\s*(?:=|:)\s*\[([^\]]+)\]",
-        re.IGNORECASE | re.DOTALL,
-    )
-    for match in tool_block_pattern.finditer(text):
-        match_str = match.group(0)
-        if path_obj.suffix.lower() == ".py" and ("re.compile" in match_str or "pattern" in match_str or "tool_block_pattern" in match_str):
+    # 2. Balanced bracket check for code blocks, Python, Markdown: tools = [ ... ]
+    for start_char, block_content, full_match in _extract_balanced_bracket_blocks(text):
+        if path_obj.suffix.lower() == ".py" and ("re.compile" in full_match or "pattern" in full_match):
             continue
 
-        block_content = match.group(1)
         names = []
         name_dict_matches = re.findall(r"['\"]name['\"]\s*:\s*['\"]([^'\"]+)['\"]", block_content)
         if name_dict_matches:
@@ -137,17 +251,16 @@ def check_tool_ordering(file_path, lines, text):
                 names = str_matches
             else:
                 ident_matches = re.findall(r"\b([a-zA-Z0-9_]+)\b", block_content)
-                names = [m for m in ident_matches if m not in {"tools", "function_declarations", "functions", "None", "True", "False"}]
+                names = [
+                    m for m in ident_matches
+                    if m not in {"tools", "function_declarations", "functions", "None", "True", "False"}
+                ]
 
         if len(names) >= 2:
             for i in range(len(names) - 1):
-                if names[i].lower() > names[i + 1].lower():
-                    start_char = match.start()
+                if (names[i].lower(), names[i]) > (names[i + 1].lower(), names[i + 1]):
                     line_no = text[:start_char].count("\n") + 1
-                    for idx, line in enumerate(lines[line_no - 1:], start=line_no):
-                        if names[i + 1] in line:
-                            line_no = idx
-                            break
+                    line_no = _find_line_for_token(lines, names[i + 1], start_line=line_no)
                     violations.append({
                         "file": str(file_path),
                         "line": line_no,
@@ -160,7 +273,7 @@ def check_tool_ordering(file_path, lines, text):
                     })
                     break
 
-    # 3. YAML list pattern:
+    # 3. YAML list pattern
     yaml_tool_pattern = re.compile(
         r"^(?:tools|function_declarations|functions)\s*:\s*\n((?:\s*-\s+.*?\n)+)",
         re.IGNORECASE | re.MULTILINE,
@@ -170,7 +283,7 @@ def check_tool_ordering(file_path, lines, text):
         names = re.findall(r"-\s+(?:name:\s*)?['\"]?([a-zA-Z0-9_-]+)['\"]?", yaml_block)
         if len(names) >= 2:
             for i in range(len(names) - 1):
-                if names[i].lower() > names[i + 1].lower():
+                if (names[i].lower(), names[i]) > (names[i + 1].lower(), names[i + 1]):
                     line_no = text[:match.start()].count("\n") + 1
                     violations.append({
                         "file": str(file_path),
@@ -204,17 +317,27 @@ def check_file(file_path, strict=False):
     full_text = "".join(lines)
     is_python_source = path_obj.suffix.lower() == ".py"
 
+    # Determine prefix boundary if an explicit dynamic tail marker is present
+    tail_line_idx = None
     for line_idx, line in enumerate(lines, start=1):
+        if TAIL_MARKER_PATTERN.search(line):
+            tail_line_idx = line_idx
+            break
+
+    prefix_lines = lines[: tail_line_idx - 1] if tail_line_idx is not None else lines
+    prefix_text = "".join(prefix_lines)
+
+    for line_idx, line in enumerate(prefix_lines, start=1):
         stripped = line.strip()
-        # Skip comment lines that document rules rather than defining prompt prefixes
-        if stripped.startswith("#") and "Google Antigravity" in stripped:
+        if INLINE_IGNORE_PATTERN.search(line):
             continue
 
         for rule in LINT_RULES:
             match = rule["regex"].search(line)
             if match:
-                # Only suppress in python source if the line is defining the lint regex itself
                 if is_python_source and ("re.compile" in line or '"regex":' in line):
+                    continue
+                if is_python_source and rule["id"] == "IN_PLACE_PROMPT_MUTATION" and stripped.startswith(("def ", "async def ")):
                     continue
                 severity = "ERROR" if (strict or rule["severity"] == "ERROR") else "WARNING"
                 violations.append({
@@ -232,16 +355,16 @@ def check_file(file_path, strict=False):
     tool_violations = check_tool_ordering(file_path, lines, full_text)
     violations.extend(tool_violations)
 
-    # Check for multi-line dynamic interpolation evasion attempts
+    # Check for multi-line dynamic interpolation evasion attempts in prefix scope
     multiline_interpolation = re.compile(
         r"{{\s*(?:timestamp|date|time|now|uuid|session_id|request_id|nonce)\s*}}",
         re.IGNORECASE | re.DOTALL,
     )
-    for match in multiline_interpolation.finditer(full_text):
+    for match in multiline_interpolation.finditer(prefix_text):
         matched_str = match.group(0)
         if "\n" in matched_str:
             start_pos = match.start()
-            line_idx = full_text[:start_pos].count("\n") + 1
+            line_idx = prefix_text[:start_pos].count("\n") + 1
             violations.append({
                 "file": str(file_path),
                 "line": line_idx,
@@ -256,10 +379,13 @@ def check_file(file_path, strict=False):
     return violations
 
 
-def collect_target_files(targets):
+def collect_target_files(targets, include_tests=False):
     """Expand file and directory targets into individual file paths."""
     resolved_files = []
     supported_extensions = {".md", ".txt", ".json", ".py", ".prompt", ".yaml", ".yml"}
+    excluded_dirs = {"__pycache__", "scratch", "logs", "node_modules", ".git"}
+    if not include_tests:
+        excluded_dirs.add("tests")
 
     for target in targets:
         p = Path(target)
@@ -267,8 +393,7 @@ def collect_target_files(targets):
             resolved_files.append(p)
         elif p.is_dir():
             for root, dirs, files in os.walk(p):
-                # Skip hidden directories and scratch caches
-                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in {"__pycache__", "scratch", "logs"}]
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in excluded_dirs]
                 for file_name in files:
                     file_path = Path(root) / file_name
                     if file_path.suffix.lower() in supported_extensions:
@@ -284,11 +409,12 @@ def main():
     parser.add_argument("targets", nargs="+", help="Files or directories to lint")
     parser.add_argument("--strict", action="store_true", help="Treat all warnings as errors")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
+    parser.add_argument("--include-tests", action="store_true", help="Include tests/ directories when scanning folders")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose inspection logs")
 
     args = parser.parse_args()
 
-    files = collect_target_files(args.targets)
+    files = collect_target_files(args.targets, include_tests=args.include_tests)
     if not files:
         if args.json:
             print(json.dumps({"status": "error", "message": "No matching files found to lint"}))

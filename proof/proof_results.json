@@ -1,391 +1,417 @@
 {
   "status": "success",
-  "benchmark_contract": "Google Antigravity Token Optimizer Proof",
-  "tested_model": "Gemini 3.8 Flash (gemini-3.8-flash)",
-  "tested_runtime": "Google Antigravity Engine (v2.0)",
+  "simulation_type": "analytical_workload_model",
+  "note": "First-principles 25-turn simulation; use tools/transcript_analyzer.py for live trace measurements.",
   "aggregates": {
-    "tested_model": "Gemini 3.8 Flash (gemini-3.8-flash)",
-    "tested_runtime": "Google Antigravity Engine (v2.0)",
     "mode_a_total_tokens": 1352000,
     "mode_a_cache_hit_rate_pct": 0.0,
-    "mode_b_total_raw_tokens": 338000,
-    "mode_b_coordinator_cached_tokens": 260000,
-    "mode_b_coordinator_uncached_tokens": 13400,
-    "mode_b_coordinator_tokens": 273400,
+    "mode_b_total_raw_tokens": 315870,
+    "mode_b_coordinator_cached_tokens": 236250,
+    "mode_b_coordinator_uncached_tokens": 15020,
+    "mode_b_coordinator_tokens": 251270,
     "mode_b_isolated_subagent_tokens": 64600,
-    "mode_b_cache_hit_rate_pct": 95.1,
-    "raw_token_reduction_pct": 75.0
-  },
-  "receipts": {
-    "proof_1_subagent_shielding": {
-      "title": "Real Antigravity Subagent Context Shielding Receipt",
-      "evidence": "Subagent c5d15edd absorbed 639 execution steps and 864,198 bytes in isolated context, shielding coordinator from 216,000 raw prompt tokens.",
-      "coordinator_token_ceiling": "Kept under 16,900 tokens throughout 25 turns."
-    },
-    "proof_2_stream_distillation": {
-      "title": "Terminal Stream Distillation Receipt",
-      "evidence": "PowerShell 20,236-line command output distilled to filtered 30-line tail, cutting step intake from 150,000 tokens to 320 tokens (99.8% reduction).",
-      "command_pattern": "command *> scratch/<task>.log; Get-Content -Tail 30"
-    },
-    "proof_3_reactive_scheduling": {
-      "title": "Reactive Wakeup vs Busy-Wait Polling Receipt",
-      "evidence": "0 tokens consumed during asynchronous dormancy vs 1.8M tokens burned in 60 polling roundtrips.",
-      "mechanism": "schedule(DurationSeconds=300, TimerCondition='never') + yield(tool_calls=[])."
-    },
-    "proof_4_turn_arithmetic": {
-      "title": "25-Turn Benchmark Token Arithmetic",
-      "evidence": "Raw token consumption reduced from 1,352,000 down to 338,000 (75.0% raw token reduction; Mode B KV cache hit rate: 95.1%)."
-    }
+    "mode_b_cache_hit_rate_pct": 94.0,
+    "raw_token_reduction_pct": 76.6
   },
   "turns": [
     {
       "turn": 1,
       "mode_a": {
+        "label": "Initial prompt + system rules",
         "uncached_tokens": 5000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 3964,
+        "label": "Cold start static prefix + task prompt",
+        "uncached_tokens": 5000,
         "cached_tokens": 0,
         "coordinator_context": 5000,
-        "coordinator_total": 3964,
+        "coordinator_total": 5000,
         "cache_hit_rate_pct": 0.0
       }
     },
     {
       "turn": 2,
       "mode_a": {
+        "label": "Unbounded full-file read (2,500 lines)",
         "uncached_tokens": 18000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 317,
-        "cached_tokens": 5147,
+        "label": "Bounded file read (<=150 lines)",
+        "uncached_tokens": 400,
+        "cached_tokens": 5000,
         "coordinator_context": 5400,
-        "coordinator_total": 5464,
-        "cache_hit_rate_pct": 94.2
+        "coordinator_total": 5400,
+        "cache_hit_rate_pct": 92.59
       }
     },
     {
       "turn": 3,
       "mode_a": {
+        "label": "Large edit + unredacted test run",
         "uncached_tokens": 26000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 278,
-        "cached_tokens": 5559,
-        "coordinator_context": 5750,
-        "coordinator_total": 5837,
-        "cache_hit_rate_pct": 95.24
+        "label": "Surgical edit",
+        "uncached_tokens": 450,
+        "cached_tokens": 5400,
+        "coordinator_context": 5850,
+        "coordinator_total": 5850,
+        "cache_hit_rate_pct": 92.31
       }
     },
     {
       "turn": 4,
       "mode_a": {
+        "label": "Second unbounded full-file read",
         "uncached_tokens": 34000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 357,
-        "cached_tokens": 5920,
-        "coordinator_context": 6200,
-        "coordinator_total": 6277,
-        "cache_hit_rate_pct": 94.31
+        "label": "Bounded inspection",
+        "uncached_tokens": 400,
+        "cached_tokens": 5850,
+        "coordinator_context": 6250,
+        "coordinator_total": 6250,
+        "cache_hit_rate_pct": 93.6
       }
     },
     {
       "turn": 5,
       "mode_a": {
+        "label": "Unshielded terminal test dump (20,000+ lines)",
         "uncached_tokens": 185000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 476,
-        "cached_tokens": 6383,
-        "coordinator_context": 6800,
-        "coordinator_total": 6859,
-        "cache_hit_rate_pct": 93.06
+        "label": "Subagent 1 dispatched + log redirected",
+        "uncached_tokens": 500,
+        "cached_tokens": 6250,
+        "coordinator_context": 6750,
+        "coordinator_total": 6750,
+        "cache_hit_rate_pct": 92.59
       }
     },
     {
       "turn": 6,
       "mode_a": {
+        "label": "Busy-wait poll 1",
         "uncached_tokens": 42000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 357,
-        "cached_tokens": 7001,
+        "label": "Reactive wakeup + subagent 1 receipt",
+        "uncached_tokens": 500,
+        "cached_tokens": 6750,
         "coordinator_context": 7250,
-        "coordinator_total": 7358,
-        "cache_hit_rate_pct": 95.15
+        "coordinator_total": 7250,
+        "cache_hit_rate_pct": 93.1
       }
     },
     {
       "turn": 7,
       "mode_a": {
+        "label": "Busy-wait poll 2",
         "uncached_tokens": 42000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 396,
-        "cached_tokens": 7464,
-        "coordinator_context": 7750,
-        "coordinator_total": 7860,
-        "cache_hit_rate_pct": 94.96
+        "label": "Surgical edit from receipt",
+        "uncached_tokens": 450,
+        "cached_tokens": 7250,
+        "coordinator_context": 7700,
+        "coordinator_total": 7700,
+        "cache_hit_rate_pct": 94.16
       }
     },
     {
       "turn": 8,
       "mode_a": {
+        "label": "Busy-wait poll 3",
         "uncached_tokens": 42000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 317,
-        "cached_tokens": 7979,
-        "coordinator_context": 8150,
-        "coordinator_total": 8296,
-        "cache_hit_rate_pct": 96.18
+        "label": "Bounded check",
+        "uncached_tokens": 400,
+        "cached_tokens": 7700,
+        "coordinator_context": 8100,
+        "coordinator_total": 8100,
+        "cache_hit_rate_pct": 95.06
       }
     },
     {
       "turn": 9,
       "mode_a": {
+        "label": "Busy-wait poll 4",
         "uncached_tokens": 42000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 515,
-        "cached_tokens": 8390,
-        "coordinator_context": 8800,
-        "coordinator_total": 8905,
-        "cache_hit_rate_pct": 94.22
+        "label": "Distilled test run (head-and-tail pointer)",
+        "uncached_tokens": 320,
+        "cached_tokens": 8100,
+        "coordinator_context": 8420,
+        "coordinator_total": 8420,
+        "cache_hit_rate_pct": 96.2
       }
     },
     {
       "turn": 10,
       "mode_a": {
+        "label": "Busy-wait poll 5",
         "uncached_tokens": 42000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 396,
-        "cached_tokens": 9060,
-        "coordinator_context": 9300,
-        "coordinator_total": 9456,
-        "cache_hit_rate_pct": 95.81
+        "label": "Surgical edit",
+        "uncached_tokens": 450,
+        "cached_tokens": 8420,
+        "coordinator_context": 8870,
+        "coordinator_total": 8870,
+        "cache_hit_rate_pct": 94.93
       }
     },
     {
       "turn": 11,
       "mode_a": {
+        "label": "Busy-wait poll 6",
         "uncached_tokens": 42000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 436,
-        "cached_tokens": 9574,
-        "coordinator_context": 9850,
-        "coordinator_total": 10010,
-        "cache_hit_rate_pct": 95.64
+        "label": "Distilled verification",
+        "uncached_tokens": 320,
+        "cached_tokens": 8870,
+        "coordinator_context": 9190,
+        "coordinator_total": 9190,
+        "cache_hit_rate_pct": 96.52
       }
     },
     {
       "turn": 12,
       "mode_a": {
+        "label": "Unshielded retry command",
         "uncached_tokens": 55000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 357,
-        "cached_tokens": 10141,
-        "coordinator_context": 10300,
-        "coordinator_total": 10498,
-        "cache_hit_rate_pct": 96.6
+        "label": "Subagent 2 dispatched",
+        "uncached_tokens": 500,
+        "cached_tokens": 9190,
+        "coordinator_context": 9690,
+        "coordinator_total": 9690,
+        "cache_hit_rate_pct": 94.84
       }
     },
     {
       "turn": 13,
       "mode_a": {
+        "label": "Edit + test rerun",
         "uncached_tokens": 55000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 317,
-        "cached_tokens": 10604,
-        "coordinator_context": 10700,
-        "coordinator_total": 10921,
-        "cache_hit_rate_pct": 97.1
+        "label": "Reactive wakeup + subagent 2 receipt",
+        "uncached_tokens": 500,
+        "cached_tokens": 9690,
+        "coordinator_context": 10190,
+        "coordinator_total": 10190,
+        "cache_hit_rate_pct": 95.09
       }
     },
     {
       "turn": 14,
       "mode_a": {
+        "label": "Unbounded git diff inspection",
         "uncached_tokens": 55000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 476,
-        "cached_tokens": 11016,
-        "coordinator_context": 11300,
-        "coordinator_total": 11492,
-        "cache_hit_rate_pct": 95.86
+        "label": "Verification of subagent output",
+        "uncached_tokens": 400,
+        "cached_tokens": 10190,
+        "coordinator_context": 10590,
+        "coordinator_total": 10590,
+        "cache_hit_rate_pct": 96.22
       }
     },
     {
       "turn": 15,
       "mode_a": {
+        "label": "Second full-file rewrite",
         "uncached_tokens": 55000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 396,
-        "cached_tokens": 11633,
-        "coordinator_context": 11800,
-        "coordinator_total": 12029,
-        "cache_hit_rate_pct": 96.71
+        "label": "Bounded file read",
+        "uncached_tokens": 400,
+        "cached_tokens": 10590,
+        "coordinator_context": 10990,
+        "coordinator_total": 10990,
+        "cache_hit_rate_pct": 96.36
       }
     },
     {
       "turn": 16,
       "mode_a": {
+        "label": "Unbounded verification check",
         "uncached_tokens": 55000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 357,
-        "cached_tokens": 12148,
-        "coordinator_context": 12250,
-        "coordinator_total": 12505,
-        "cache_hit_rate_pct": 97.15
+        "label": "Surgical edit",
+        "uncached_tokens": 450,
+        "cached_tokens": 10990,
+        "coordinator_context": 11440,
+        "coordinator_total": 11440,
+        "cache_hit_rate_pct": 96.07
       }
     },
     {
       "turn": 17,
       "mode_a": {
+        "label": "Full test rerun",
         "uncached_tokens": 55000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 436,
-        "cached_tokens": 12611,
-        "coordinator_context": 12800,
-        "coordinator_total": 13047,
-        "cache_hit_rate_pct": 96.66
+        "label": "Distilled test run",
+        "uncached_tokens": 320,
+        "cached_tokens": 11440,
+        "coordinator_context": 11760,
+        "coordinator_total": 11760,
+        "cache_hit_rate_pct": 97.28
       }
     },
     {
       "turn": 18,
       "mode_a": {
+        "label": "Busy-wait poll 7",
         "uncached_tokens": 60000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 317,
-        "cached_tokens": 13178,
-        "coordinator_context": 13200,
-        "coordinator_total": 13495,
-        "cache_hit_rate_pct": 97.65
+        "label": "Bounded check",
+        "uncached_tokens": 400,
+        "cached_tokens": 11760,
+        "coordinator_context": 12160,
+        "coordinator_total": 12160,
+        "cache_hit_rate_pct": 96.71
       }
     },
     {
       "turn": 19,
       "mode_a": {
+        "label": "Busy-wait poll 8",
         "uncached_tokens": 60000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 476,
-        "cached_tokens": 13589,
-        "coordinator_context": 13800,
-        "coordinator_total": 14065,
-        "cache_hit_rate_pct": 96.62
+        "label": "Distilled test check",
+        "uncached_tokens": 320,
+        "cached_tokens": 12160,
+        "coordinator_context": 12480,
+        "coordinator_total": 12480,
+        "cache_hit_rate_pct": 97.44
       }
     },
     {
       "turn": 20,
       "mode_a": {
+        "label": "Busy-wait poll 9",
         "uncached_tokens": 60000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 357,
-        "cached_tokens": 14207,
-        "coordinator_context": 14250,
-        "coordinator_total": 14564,
-        "cache_hit_rate_pct": 97.55
+        "label": "Surgical polish",
+        "uncached_tokens": 450,
+        "cached_tokens": 12480,
+        "coordinator_context": 12930,
+        "coordinator_total": 12930,
+        "cache_hit_rate_pct": 96.52
       }
     },
     {
       "turn": 21,
       "mode_a": {
+        "label": "Busy-wait poll 10",
         "uncached_tokens": 60000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 396,
-        "cached_tokens": 14670,
-        "coordinator_context": 14750,
-        "coordinator_total": 15066,
-        "cache_hit_rate_pct": 97.37
+        "label": "Distilled verify",
+        "uncached_tokens": 320,
+        "cached_tokens": 12930,
+        "coordinator_context": 13250,
+        "coordinator_total": 13250,
+        "cache_hit_rate_pct": 97.58
       }
     },
     {
       "turn": 22,
       "mode_a": {
+        "label": "Busy-wait poll 11",
         "uncached_tokens": 60000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 357,
-        "cached_tokens": 15185,
-        "coordinator_context": 15200,
-        "coordinator_total": 15542,
-        "cache_hit_rate_pct": 97.7
+        "label": "Clean review",
+        "uncached_tokens": 400,
+        "cached_tokens": 13250,
+        "coordinator_context": 13650,
+        "coordinator_total": 13650,
+        "cache_hit_rate_pct": 97.07
       }
     },
     {
       "turn": 23,
       "mode_a": {
+        "label": "Busy-wait poll 12",
         "uncached_tokens": 60000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 436,
-        "cached_tokens": 15648,
-        "coordinator_context": 15750,
-        "coordinator_total": 16084,
-        "cache_hit_rate_pct": 97.29
+        "label": "Distilled final test pass",
+        "uncached_tokens": 320,
+        "cached_tokens": 13650,
+        "coordinator_context": 13970,
+        "coordinator_total": 13970,
+        "cache_hit_rate_pct": 97.71
       }
     },
     {
       "turn": 24,
       "mode_a": {
+        "label": "Unshielded final build",
         "uncached_tokens": 60000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 357,
-        "cached_tokens": 16215,
-        "coordinator_context": 16200,
-        "coordinator_total": 16572,
-        "cache_hit_rate_pct": 97.85
+        "label": "Bounded verification",
+        "uncached_tokens": 400,
+        "cached_tokens": 13970,
+        "coordinator_context": 14370,
+        "coordinator_total": 14370,
+        "cache_hit_rate_pct": 97.22
       }
     },
     {
       "turn": 25,
       "mode_a": {
+        "label": "Comprehensive unshielded walk-through",
         "uncached_tokens": 82000,
         "cached_tokens": 0
       },
       "mode_b": {
-        "uncached_tokens": 556,
-        "cached_tokens": 16678,
-        "coordinator_context": 16900,
-        "coordinator_total": 17234,
-        "cache_hit_rate_pct": 96.77
+        "label": "Compact completion summary",
+        "uncached_tokens": 650,
+        "cached_tokens": 14370,
+        "coordinator_context": 15020,
+        "coordinator_total": 15020,
+        "cache_hit_rate_pct": 95.67
       }
     }
   ]

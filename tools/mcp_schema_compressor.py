@@ -3,18 +3,25 @@
 
 Enforces Invariant 6 (Deterministic Tool Schema Ordering) and compresses
 verbose MCP tool definitions before registration at the prompt head.
-Prunes redundant nulls, empty default objects, and schema boilerplate.
-Condenses verbose markdown docstrings and descriptions to concise, single-sentence
-noun phrases while preserving parameter constraints and types.
+
+By default, operates losslessly:
+- Deterministically sorts tool declarations, dictionary keys, and required arrays.
+- Prunes redundant nulls, `$schema` boilerplate, redundant titles, and empty containers.
+- Trims leading/trailing description whitespace without dropping instructions.
+
+With `--condense-descriptions` (`condense=True`), also condenses verbose
+markdown docstrings into single-sentence noun phrases while preserving
+range, default, and allowed-value constraints.
 """
 
 import argparse
 import json
 import math
-import os
 import re
 import sys
 from pathlib import Path
+
+TOOL_ARRAY_KEYS = {"tools", "function_declarations", "functions"}
 
 
 def condense_description(desc: str) -> str:
@@ -22,7 +29,7 @@ def condense_description(desc: str) -> str:
     if not desc or not isinstance(desc, str):
         return ""
 
-    # Replace any unicode dashes with standard hyphens
+    # Replace unicode dashes with standard hyphens
     text = desc.replace("\u2014", "-").replace("\u2013", "-")
 
     # Remove markdown headings, bold, italic, code ticks
@@ -75,24 +82,30 @@ def condense_description(desc: str) -> str:
     else:
         clean_primary = primary
 
-    # Search subsequent sentences for constraints (ranges, defaults, bounds)
+    # Search subsequent sentences for constraints (ranges, defaults, allowed values)
     constraints = []
     rest_text = " ".join(sentences[1:])
 
-    # Check for range: e.g. (500 to 10000) or 500 to 10000
+    # Range: e.g. "500 to 10000" or "(500 to 10000)"
     range_match = re.search(r"\b(\d+\s*to\s*\d+)\b", rest_text, re.IGNORECASE)
     if range_match and range_match.group(1) not in clean_primary:
         constraints.append(f"Range: {range_match.group(1)}")
 
-    # Check for default: e.g. "Default is 10" or "Default: 10"
+    # Default: e.g. "Default is 10" or "Default: 10"
     default_match = re.search(r"\bDefault\s*(?:is|:)\s*([^\s.,;)]+)", rest_text, re.IGNORECASE)
     if default_match and "default" not in clean_primary.lower():
         constraints.append(f"Default: {default_match.group(1)}")
 
-    # Check for allowed/enum: e.g. "Allowed: a, b, c"
-    allowed_match = re.search(r"\bAllowed(?:\s*values)?\s*(?:are|:)\s*([^\s.,;)]+)", rest_text, re.IGNORECASE)
+    # Allowed/enum: e.g. "Allowed: read, write, admin." or "Allowed values are a, b, c."
+    allowed_match = re.search(
+        r"\bAllowed(?:\s*values)?\s*(?:are|:)\s*([^.;\n)]+)",
+        rest_text,
+        re.IGNORECASE,
+    )
     if allowed_match and "allowed" not in clean_primary.lower():
-        constraints.append(f"Allowed: {allowed_match.group(1)}")
+        allowed_vals = re.sub(r"\s+", " ", allowed_match.group(1)).strip().rstrip(",")
+        if allowed_vals:
+            constraints.append(f"Allowed: {allowed_vals}")
 
     if constraints:
         constraint_str = ", ".join(constraints)
@@ -107,12 +120,26 @@ def condense_description(desc: str) -> str:
 def get_tool_name(item):
     """Extract tool identifier name from dictionary representation."""
     if isinstance(item, dict):
-        return item.get("name") or item.get("function", {}).get("name") or item.get("tool", {}).get("name") or ""
+        return (
+            item.get("name")
+            or (item.get("function", {}).get("name") if isinstance(item.get("function"), dict) else None)
+            or (item.get("tool", {}).get("name") if isinstance(item.get("tool"), dict) else None)
+            or ""
+        )
     return str(item)
 
 
-def compress_schema_node(node, parent_key=None):
-    """Recursively prune, sort, and condense schema nodes."""
+def _is_tool_object_list(node, parent_key):
+    """Identify lists of tool definitions rather than arbitrary ordered lists."""
+    if not node or not all(isinstance(item, dict) for item in node):
+        return False
+    if parent_key is not None and parent_key not in TOOL_ARRAY_KEYS:
+        return False
+    return all(bool(get_tool_name(item)) for item in node)
+
+
+def compress_schema_node(node, parent_key=None, condense=False):
+    """Recursively prune, sort, and optionally condense schema nodes."""
     if isinstance(node, dict):
         cleaned = {}
         for k, v in node.items():
@@ -131,19 +158,22 @@ def compress_schema_node(node, parent_key=None):
                 if "name" in node and v.lower() == str(node["name"]).lower():
                     continue
 
-            # Condense or prune empty descriptions
+            # Handle description (lossless trim by default; aggressive condense if requested)
             if k == "description" and isinstance(v, str):
-                v_condensed = condense_description(v)
-                if not v_condensed:
+                if condense:
+                    v_processed = condense_description(v)
+                else:
+                    v_processed = re.sub(r"\s+", " ", v).strip()
+                if not v_processed:
                     continue
-                v = v_condensed
+                v = v_processed
 
             # Prune empty container boilerplate
             if isinstance(v, (list, dict)) and len(v) == 0 and k in {"examples", "definitions", "$defs", "enum"}:
                 continue
 
             # Recursively compress child node
-            processed_val = compress_schema_node(v, parent_key=k)
+            processed_val = compress_schema_node(v, parent_key=k, condense=condense)
 
             # Skip if value became empty container for boilerplate keys
             if k in {"examples", "definitions", "$defs"} and isinstance(processed_val, (list, dict)) and len(processed_val) == 0:
@@ -155,26 +185,23 @@ def compress_schema_node(node, parent_key=None):
         return dict(sorted(cleaned.items(), key=lambda pair: pair[0]))
 
     elif isinstance(node, list):
-        # If it's a list of tool objects, sort alphabetically by tool name
-        has_tools = any(isinstance(item, dict) and get_tool_name(item) for item in node)
-        if has_tools:
+        # Only sort tool declaration arrays alphabetically by tool name
+        if _is_tool_object_list(node, parent_key):
             node = sorted(node, key=lambda item: (get_tool_name(item).lower(), get_tool_name(item)))
         elif parent_key in {"required", "tags", "keywords"} and all(isinstance(item, str) for item in node):
-            # Sort required and tag string arrays alphabetically
             node = sorted(node)
 
-        # Recursively process list items
-        return [compress_schema_node(item, parent_key=parent_key) for item in node]
+        return [compress_schema_node(item, parent_key=parent_key, condense=condense) for item in node]
 
     elif isinstance(node, str) and parent_key == "description":
-        return condense_description(node)
+        return condense_description(node) if condense else re.sub(r"\s+", " ", node).strip()
 
     return node
 
 
-def compress_schema(data):
+def compress_schema(data, condense=False):
     """Compress and deterministically order a parsed schema data structure."""
-    return compress_schema_node(data)
+    return compress_schema_node(data, condense=condense)
 
 
 def serialize_schema(data, minify=False):
@@ -185,7 +212,7 @@ def serialize_schema(data, minify=False):
 
 
 def calculate_metrics(raw_text, compressed_text):
-    """Calculate token economy metrics."""
+    """Calculate token economy metrics (using ~4 chars/token heuristic)."""
     chars_before = len(raw_text)
     chars_after = len(compressed_text)
     tokens_before = int(math.ceil(chars_before / 4.0)) if chars_before > 0 else 0
@@ -221,6 +248,11 @@ def main():
     parser.add_argument("-o", "--output", help="Output file path (defaults to stdout)")
     parser.add_argument("--in-place", action="store_true", help="Modify the input file in place")
     parser.add_argument("--minify", action="store_true", help="Output compact JSON without indentation")
+    parser.add_argument(
+        "--condense-descriptions",
+        action="store_true",
+        help="Aggressively condense multi-sentence docstrings into single-sentence noun phrases (opt-in)",
+    )
     parser.add_argument("--check", action="store_true", help="Check if schema is already compressed and sorted; exit code 1 if not")
     parser.add_argument("--info", action="store_true", help="Print token economy metrics")
 
@@ -250,7 +282,7 @@ def main():
         sys.stderr.write(f"Error: Invalid JSON input: {exc}\n")
         sys.exit(1)
 
-    compressed_data = compress_schema(data)
+    compressed_data = compress_schema(data, condense=args.condense_descriptions)
     output_text = serialize_schema(compressed_data, minify=args.minify)
     metrics = calculate_metrics(raw_text, output_text)
 
