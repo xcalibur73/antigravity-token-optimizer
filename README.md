@@ -6,7 +6,7 @@ Google Antigravity Token Optimizer is a context engineering and prompt caching t
 
 Unshielded agent sessions rapidly burn input tokens across multi-turn workflows due to compounding mechanics: dynamic prefix mutation breaking KV prompt caching, non-deterministic tool schema serialization mutating the prompt head, in-place prompt modifications invalidating prior context, unrestricted terminal output dumping thousands of log lines into context, and busy-wait polling loops repeatedly resending conversation histories.
 
-By enforcing the 7 Antigravity Invariants—and verifying them with static prefix linting, deterministic schema compression, and transcript auditing—sessions preserve high KV cache hit rates while keeping coordinator context compact.
+By enforcing the 7 Antigravity Invariants - and verifying them with static prefix linting, deterministic schema compression, and transcript auditing - sessions preserve high KV cache hit rates while keeping coordinator context compact.
 
 ## 10-Second Quickstart
 
@@ -50,18 +50,32 @@ Antigravity Token Optimizer enforces strict prefix invariance: system instructio
 
 ## The 7 Antigravity Invariants
 
-1. **Strict Prefix Invariance**: System instructions, tool definitions, and workspace rules remain static and leading. Dynamic turn metadata, timestamps, and request identifiers go strictly at the tail of user turns (after `<!-- DYNAMIC_TAIL -->` in templates).
-2. **Subagent Context Shielding**: The coordinator acts as an orchestrator. Non-trivial tasks exceeding 50 lines of code modification, multi-file edits, or extensive exploration sweeps are delegated to isolated background subagents via `invoke_subagent`, keeping coordinator context compact (< 20,000 tokens).
-3. **Head-and-Tail Terminal Stream Distillation**: Commands producing more than 30 lines of output redirect stdout and stderr to `scratch/<task>.log`. Agents inspect output via the Head-and-Tail Observation Pointer pattern (first 5 lines, clickable `file:///...` pointer URI, trailing 25 lines).
-4. **Line-Bounded File Inspection**: Pass `StartLine` and `EndLine` (or equivalent line-range flags) bounded to at most 150 lines per chunk for files exceeding 150 lines.
-5. **Reactive Event Scheduling**: Coordinators yield turns with zero tool calls (`tool_calls: []`) when waiting on asynchronous subagents/tasks and rely on reactive wakeups or a single `schedule` watchdog deadline rather than polling loops.
-6. **Deterministic Tool Schema Ordering**: Tool schemas, function declarations, parameter properties, and `required` lists are sorted alphabetically prior to registration so prompt prefix bytes remain identical across turns and processes.
-7. **Append-Only State Updates**: Never mutate historical messages or system prompts in place when working directory, permissions, or environment flags change. Append state deltas at the conversation tail.
+1. Strict Prefix Invariance: System instructions, tool definitions, and workspace rules remain static and leading. Dynamic turn metadata, timestamps, and request identifiers go strictly at the tail of user turns (after `<!-- DYNAMIC_TAIL -->` in templates).
+2. Subagent Context Shielding: The coordinator acts as an orchestrator. Non-trivial tasks exceeding 50 lines of code modification, multi-file edits, or extensive exploration sweeps are delegated to isolated background subagents via `invoke_subagent`, keeping coordinator context compact (< 20,000 tokens).
+3. Head-and-Tail Terminal Stream Distillation: Commands producing more than 30 lines of output redirect stdout and stderr to `scratch/<task>.log`. Agents inspect output via the Head-and-Tail Observation Pointer pattern (first 5 lines, clickable `file:///...` pointer URI, trailing 25 lines).
+4. Line-Bounded File Inspection: Pass `StartLine` and `EndLine` (or equivalent line-range flags) bounded to at most 150 lines per chunk for files exceeding 150 lines.
+5. Reactive Event Scheduling: Coordinators yield turns with zero tool calls (`tool_calls: []`) when waiting on asynchronous subagents/tasks and rely on reactive wakeups or a single `schedule` watchdog deadline rather than polling loops.
+6. Deterministic Tool Schema Ordering: Tool schemas, function declarations, parameter properties, and `required` lists are sorted alphabetically prior to registration so prompt prefix bytes remain identical across turns and processes.
+7. Append-Only State Updates: Never mutate historical messages or system prompts in place when working directory, permissions, or environment flags change. Append state deltas at the conversation tail.
 
 ## Measuring Real Sessions vs. Analytical Workload Simulation
 
+### Empirical Production Telemetry (Antigravity v2.32)
+Auditing four multi-hundred-step Antigravity v2.32 Desktop sessions (`5,102` total steps, `1,745` LLM usage turns, `231,433,665` measured prompt tokens) quantifies what each optimization layer contributes in live production:
+
+| Stage | Active Mechanisms | Cumulative Prompt Volume (4 Sessions) | Effective Input Cost (Gemini 3.8 Flash) | Delta vs. Previous Stage |
+| :--- | :--- | :--- | :--- | :--- |
+| Stage 0: Unoptimized Baseline | Dynamic prefix churn, raw terminal output dumps, unshielded reads | `231,433,665+` tokens (`0%` KV cache reuse) | `$23.14+` | Baseline |
+| Stage 1: Prefix Invariance + `run_command` Hook + Soft Rules | Static leading rules, `>30L` stream redirection, subagent delegation | `219,414,350` cached / `12,019,315` uncached (`94.81%` cache hit) | `$6.69` | -71.1% effective input cost (`-$16.45`) |
+| Stage 2: + `PreToolUse` `read_file` / `view_file` Line Guard | Blocks remaining 15% to 20% of unbounded whole-file reads (`>150L`) | Projected `~215M` to `224M` cumulative tokens | `~$6.15` to `$6.48` | -3% to -8% additional (`-$0.21` to `-$0.54`), plus ~15% to 20% more turns before `/compact` |
+
+What Hooks Do Not Solve (Remaining Bottlenecks):
+1. Large `write_file` and `edit_file` payloads in the main coordinator thread: Single-turn writes can inject up to ~26k tokens directly into coordinator history and compound across every subsequent turn. Mitigate by delegating >50-line edits to isolated subagents.
+2. Quadratic `N^2` prefix compounding on 900+ turn threads: Even at a 94%+ cache hit rate, letting a session grow past 250k context forces every turn to re-read the entire accumulated prefix. Mitigate by running `/compact` or starting a new chat at 80k to 100k tokens (~250 to 300 steps).
+3. Large MCP and internal `GENERIC` tool responses: Structured tool payloads (10k+ tokens per call) bypass shell redirection and `read_file` hooks, so keep MCP queries tightly scoped.
+
 ### Measure Your Own Real Transcripts
-Use `tools/transcript_analyzer.py` to audit real Antigravity `transcript.jsonl` logs (or Gemini API JSONL traces) for actual `promptTokenCount`, `cachedContentTokenCount`, KV cache hit rates, oversized command outputs (> 30 lines), unbounded `view_file` reads, and busy-wait polling sequences:
+Use `tools/transcript_analyzer.py` to audit real Antigravity `transcript.jsonl` logs (supporting both Antigravity v2.32 top-level `PLANNER_RESPONSE` token telemetry - `input_tokens`, `cache_read_tokens`, and `output_tokens` where `prompt_tokens = input_tokens + cache_read_tokens` - and Gemini API `usageMetadata`) for KV cache hit rates, oversized command outputs (> 30 lines), unbounded `read_file`/`view_file` reads, and busy-wait polling sequences:
 
 ```bash
 python tools/transcript_analyzer.py /path/to/transcript.jsonl
@@ -70,8 +84,8 @@ python tools/transcript_analyzer.py /path/to/transcript.jsonl --json
 
 ### Analytical Workload Simulation (`proof/benchmark_proof.py`)
 `proof/benchmark_proof.py` provides a transparent, first-principles 25-turn token accounting simulation comparing:
-- **Mode A (Unshielded)**: Dynamic prefix breaks KV cache on every turn (`0.0%` hit rate), full-file reads, an unredacted 20,000-line test dump, and two 6-cycle busy-wait polling loops (`1,352,000` cumulative input tokens).
-- **Mode B (Invariant-Shielded)**: Static prefix + append-only deltas (`236,250` cached coordinator tokens, `15,020` uncached delta tokens, `94.0%` coordinator KV cache hit rate, `64,600` isolated subagent tokens = `315,870` total system tokens, a `76.6%` modeled raw token reduction).
+- Mode A (Unshielded): Dynamic prefix breaks KV cache on every turn (`0.0%` hit rate), full-file reads, an unredacted 20,000-line test dump, and two 6-cycle busy-wait polling loops (`1,352,000` cumulative input tokens).
+- Mode B (Invariant-Shielded): Static prefix + append-only deltas (`236,250` cached coordinator tokens, `15,020` uncached delta tokens, `94.0%` coordinator KV cache hit rate, `64,600` isolated subagent tokens = `315,870` total system tokens, a `76.6%` modeled raw token reduction).
 
 Run the simulation and regenerate `proof/proof_results.json`:
 
@@ -160,7 +174,7 @@ python tools/mcp_schema_compressor.py --input schema.json --check
 ```
 
 ### 3. Transcript Analyzer (`tools/transcript_analyzer.py`)
-Auto-discovers Antigravity `transcript.jsonl` files across CLI (`~/.gemini/jetski/brain`), Desktop (`~/.gemini/antigravity/brain`), and IDE (`~/.gemini/antigravity-ide/brain`) to measure KV cache hit rates, run `O(1)` reverse byte-seek `--tail` health checks, identify Top-5 token consumers, flag oversized outputs (> 30 lines), unbounded `view_file` reads, polling loops, and redundant tool loops, and generate `<CONTEXT_SUMMARY>` `--handoff` prompts:
+Auto-discovers Antigravity `transcript.jsonl` files across CLI (`~/.gemini/jetski/brain`), Desktop (`~/.gemini/antigravity/brain`), and IDE (`~/.gemini/antigravity-ide/brain`) to measure KV cache hit rates across both Antigravity v2.32 top-level `PLANNER_RESPONSE` token fields (`input_tokens`, `cache_read_tokens`, `output_tokens`) and Gemini API `usageMetadata`. Runs `O(1)` reverse byte-seek `--tail` health checks, identifies Top-5 token consumers, flags oversized outputs (> 30 lines, including `"Command exited with code"` payloads on `GENERIC` steps), detects unbounded `read_file`/`view_file` calls (`Path` / `file_path`, including JSON-encoded path strings), polling loops, and redundant tool loops, and generates clean `<CONTEXT_SUMMARY>` `--handoff` prompts:
 
 ```bash
 python tools/transcript_analyzer.py --list
@@ -171,11 +185,11 @@ python tools/transcript_analyzer.py /path/to/transcript.jsonl --json
 ```
 
 ### 4. `PreToolUse` Guardrail Hook (`tools/antigravity_pretool_hook.py`)
-Zero-dependency Antigravity `PreToolUse` hook (`allow`/`deny`, ACP/IDE/CLI compatible) enforcing Invariant 4 (blocking unbounded `view_file`/`read_file` reads > 150 lines or 12 KB) and Invariant 3 (blocking bare `cat`/`Get-Content`/`type` dumps on large logs). Installed into `~/.gemini/config/hooks.json` via `--with-hooks` / `-WithHooks` (set `TOKEN_OPTIMIZER_HOOK_BYPASS=1` for emergency bypass).
+Zero-dependency Antigravity `PreToolUse` hook (`allow`/`deny`, ACP/IDE/CLI compatible) enforcing Invariant 4 (blocking unbounded `read_file`/`view_file` reads > 150 lines or 12 KB, normalizing both Antigravity v2.32 `Path` / `StartLine` / `EndLine` and `file_path` / `start_line` / `end_line` schemas plus JSON-quoted paths) and Invariant 3 (blocking bare `cat`/`Get-Content`/`type` dumps on large logs). Installed into `~/.gemini/config/hooks.json` via `--with-hooks` / `-WithHooks` (set `TOKEN_OPTIMIZER_HOOK_BYPASS=1` for emergency bypass).
 
 ### 5. Pattern Demonstrations (`examples/`)
-- `python examples/reactive_watchdog_pattern.py` — Demonstrates coordinator yield + watchdog teardown.
-- `powershell -ExecutionPolicy Bypass -File examples/terminal_distillation_pattern.ps1` — Demonstrates PowerShell stream redirection and Head-and-Tail pointers.
+- `python examples/reactive_watchdog_pattern.py` - Demonstrates coordinator yield + watchdog teardown.
+- `powershell -ExecutionPolicy Bypass -File examples/terminal_distillation_pattern.ps1` - Demonstrates PowerShell stream redirection and Head-and-Tail pointers.
 
 ### 6. Unit Test Suite
 ```bash
