@@ -199,7 +199,7 @@ if $WITH_HOOKS; then
     HOOK_CONTENT="$(load_hook_script)"
     mkdir -p "$(dirname "$HOOK_DEST")"
     printf '%s\n' "$HOOK_CONTENT" > "$HOOK_DEST"
-    chmod +x "$HOOK_DEST"
+    chmod +x "$HOOK_DEST" 2>/dev/null || true
     echo "Installed PreToolUse hook script: $HOOK_DEST"
 
     if [[ -f "$HOOKS_JSON" ]]; then
