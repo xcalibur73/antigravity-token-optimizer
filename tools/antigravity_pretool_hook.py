@@ -63,7 +63,15 @@ def _int_env(name: str, default: int) -> int:
 def _clean_path(raw: str) -> str:
     if not raw or not isinstance(raw, str):
         return ""
-    text = raw.strip().strip('"').strip("'")
+    text = raw.strip()
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        try:
+            decoded = json.loads(text)
+            if isinstance(decoded, str) and not any(ord(c) < 32 for c in decoded):
+                text = decoded
+        except (json.JSONDecodeError, ValueError):
+            pass
+    text = text.strip().strip('"').strip("'")
     if text.startswith("file:///"):
         text = text[7:]
         # Handle Windows drive URIs like /C:/foo
@@ -74,6 +82,14 @@ def _clean_path(raw: str) -> str:
     text = unquote(text)
     text = re.sub(r"#L\d+(?:-L?\d+)?$", "", text, flags=re.IGNORECASE)
     return text.strip()
+
+
+def _first_present(mapping: dict, *keys: str):
+    for key in keys:
+        val = mapping.get(key)
+        if val is not None:
+            return val
+    return None
 
 
 def _parse_int(val):
@@ -170,7 +186,8 @@ def evaluate_tool_call(payload: dict) -> dict:
     # 1. Guard view_file / read_file (Invariant 4)
     if tool_name in {"view_file", "read_file"}:
         raw_path = (
-            args.get("AbsolutePath")
+            args.get("Path")
+            or args.get("AbsolutePath")
             or args.get("TargetFile")
             or args.get("file_path")
             or args.get("path")
@@ -180,8 +197,8 @@ def evaluate_tool_call(payload: dict) -> dict:
         if path_obj is None or not path_obj.is_file() or _is_exempt_path(path_obj):
             return {"decision": "allow"}
 
-        start_line = _parse_int(args.get("StartLine") if "StartLine" in args else args.get("startLine"))
-        end_line = _parse_int(args.get("EndLine") if "EndLine" in args else args.get("endLine"))
+        start_line = _parse_int(_first_present(args, "StartLine", "startLine", "start_line"))
+        end_line = _parse_int(_first_present(args, "EndLine", "endLine", "end_line"))
 
         # Explicit bounded range: enforce chunk size <= max_lines
         if start_line is not None and end_line is not None and end_line >= start_line:

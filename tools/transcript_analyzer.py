@@ -38,36 +38,86 @@ def _estimate_tokens(text: str) -> int:
     return int(math.ceil(len(text) / 4.0))
 
 
+def _clean_arg_str(val) -> str:
+    if not isinstance(val, str):
+        return ""
+    text = val.strip()
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        try:
+            decoded = json.loads(text)
+            if isinstance(decoded, str):
+                return decoded
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return text
+
+
+def _first_not_none(mapping: dict, *keys: str):
+    for key in keys:
+        val = mapping.get(key)
+        if val is not None:
+            return val
+    return None
+
+
 def _extract_usage(record: dict):
     """Extract prompt, cached, and output token counts from Gemini/Antigravity metadata if present."""
-    usage = (
-        record.get("usageMetadata")
-        or record.get("usage_metadata")
-        or record.get("usage")
-        or {}
-    )
-    if not isinstance(usage, dict):
+    if not isinstance(record, dict):
         return None
 
-    prompt_tokens = usage.get("promptTokenCount")
-    if prompt_tokens is None:
-        prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+    usage = None
+    for key in ("usageMetadata", "usage_metadata", "usage"):
+        candidate = record.get(key)
+        if (
+            isinstance(candidate, dict)
+            and _first_not_none(candidate, "promptTokenCount", "prompt_tokens", "input_tokens") is not None
+        ):
+            usage = candidate
+            break
+    if usage is None:
+        usage = record
 
-    cached_tokens = usage.get("cachedContentTokenCount")
+    explicit_prompt = _first_not_none(usage, "promptTokenCount", "prompt_tokens")
+    input_tokens = usage.get("input_tokens") if explicit_prompt is None else None
+    cached_tokens = _first_not_none(
+        usage,
+        "cachedContentTokenCount",
+        "cache_read_tokens",
+        "cache_read_input_tokens",
+        "cached_tokens",
+    )
     if cached_tokens is None:
-        cached_tokens = usage.get("cached_tokens") or 0
-
-    output_tokens = usage.get("candidatesTokenCount")
+        cached_tokens = 0
+    output_tokens = _first_not_none(
+        usage,
+        "candidatesTokenCount",
+        "completion_tokens",
+        "output_tokens",
+    )
     if output_tokens is None:
-        output_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+        output_tokens = 0
 
-    if prompt_tokens is None:
+    cached_count = int(cached_tokens)
+    output_count = int(output_tokens)
+
+    if explicit_prompt is not None:
+        prompt_tokens = int(explicit_prompt)
+        if cached_count > prompt_tokens:
+            prompt_tokens += cached_count
+    elif input_tokens is not None:
+        if "cache_read_tokens" in usage or "cache_read_input_tokens" in usage:
+            prompt_tokens = int(input_tokens) + cached_count
+        else:
+            prompt_tokens = int(input_tokens)
+            if cached_count > prompt_tokens:
+                prompt_tokens += cached_count
+    else:
         return None
 
     return {
         "prompt_tokens": int(prompt_tokens),
-        "cached_tokens": int(cached_tokens or 0),
-        "output_tokens": int(output_tokens or 0),
+        "cached_tokens": cached_count,
+        "output_tokens": output_count,
     }
 
 
@@ -287,7 +337,11 @@ def analyze_transcript(jsonl_path: Path, context_limit: int = DEFAULT_CONTEXT_LI
 
         # Detect oversized tool/command outputs in content
         line_count = content.count("\n") + (1 if content else 0)
-        if step_type in {"TOOL_RESPONSE", "COMMAND_OUTPUT", "OBSERVATION"} or "The command exited with code" in content:
+        if (
+            step_type in {"TOOL_RESPONSE", "COMMAND_OUTPUT", "OBSERVATION"}
+            or "The command exited with code" in content
+            or "Command exited with code" in content
+        ):
             if line_count > 30:
                 oversized_outputs.append({
                     "step_index": step_id,
@@ -323,10 +377,24 @@ def analyze_transcript(jsonl_path: Path, context_limit: int = DEFAULT_CONTEXT_LI
                     args = {}
 
             if name in {"view_file", "read_file"} and isinstance(args, dict):
-                if args.get("StartLine") is None and args.get("EndLine") is None and args.get("startLine") is None and args.get("endLine") is None:
+                if (
+                    args.get("StartLine") is None
+                    and args.get("EndLine") is None
+                    and args.get("startLine") is None
+                    and args.get("endLine") is None
+                    and args.get("start_line") is None
+                    and args.get("end_line") is None
+                ):
+                    raw_path = (
+                        args.get("Path")
+                        or args.get("AbsolutePath")
+                        or args.get("TargetFile")
+                        or args.get("file_path")
+                        or args.get("path")
+                    )
                     unbounded_reads.append({
                         "step_index": step_id,
-                        "path": args.get("AbsolutePath") or args.get("file_path") or args.get("path") or "<unknown>",
+                        "path": _clean_arg_str(raw_path) or "<unknown>",
                     })
 
             if name in {"manage_task", "manage_subagents"} and isinstance(args, dict):
@@ -475,8 +543,14 @@ def generate_handoff_summary(jsonl_path: Path, context_limit: int = DEFAULT_CONT
                         args = {}
                 if not isinstance(args, dict):
                     continue
-                target = args.get("TargetFile") or args.get("AbsolutePath") or args.get("file_path") or args.get("path")
-                if not isinstance(target, str) or not target:
+                target = _clean_arg_str(
+                    args.get("Path")
+                    or args.get("TargetFile")
+                    or args.get("AbsolutePath")
+                    or args.get("file_path")
+                    or args.get("path")
+                )
+                if not target:
                     continue
                 if name in {"replace_file_content", "multi_replace_file_content", "write_to_file", "edit_file", "write_file"}:
                     if target not in seen_modified:

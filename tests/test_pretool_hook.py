@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tools.antigravity_pretool_hook import evaluate_tool_call
+from tools.antigravity_pretool_hook import _clean_path, evaluate_tool_call
 
 
 class TestPreToolHook(unittest.TestCase):
@@ -122,6 +122,61 @@ class TestPreToolHook(unittest.TestCase):
         )
         self.assertEqual(res_bypass.returncode, 0)
         self.assertEqual(json.loads(res_bypass.stdout)["decision"], "allow")
+
+    def test_read_file_with_capital_path_and_bounded_lines(self):
+        res_deny = evaluate_tool_call({
+            "toolCall": {"name": "read_file", "args": {"Path": str(self.large_file)}}
+        })
+        self.assertEqual(res_deny["decision"], "deny")
+        self.assertIn("Invariant 4", res_deny["reason"])
+
+        res_allow = evaluate_tool_call({
+            "toolCall": {
+                "name": "read_file",
+                "args": {"Path": str(self.large_file), "StartLine": 1, "EndLine": 100},
+            }
+        })
+        self.assertEqual(res_allow["decision"], "allow")
+
+    def test_read_file_with_json_quoted_path_and_none_line_fallbacks(self):
+        quoted_path = json.dumps(str(self.large_file))
+        res_deny = evaluate_tool_call({
+            "toolCall": {"name": "read_file", "args": {"Path": quoted_path}}
+        })
+        self.assertEqual(res_deny["decision"], "deny")
+
+        res_allow = evaluate_tool_call({
+            "toolCall": {
+                "name": "read_file",
+                "args": {
+                    "Path": quoted_path,
+                    "StartLine": None,
+                    "start_line": 1,
+                    "EndLine": None,
+                    "end_line": 100,
+                },
+            }
+        })
+        self.assertEqual(res_allow["decision"], "allow")
+
+        res_oversized = evaluate_tool_call({
+            "toolCall": {
+                "name": "read_file",
+                "args": {
+                    "Path": quoted_path,
+                    "StartLine": None,
+                    "start_line": 1,
+                    "EndLine": None,
+                    "end_line": 200,
+                },
+            }
+        })
+        self.assertEqual(res_oversized["decision"], "deny")
+
+    def test_clean_path_json_encoded_and_shell_quoted_windows_paths(self):
+        self.assertEqual(_clean_path(json.dumps(r"C:\temp\new\bar.py")), r"C:\temp\new\bar.py")
+        self.assertEqual(_clean_path(r'"C:\temp\new\bar.py"'), r"C:\temp\new\bar.py")
+        self.assertEqual(_clean_path(json.dumps("file:///C:/foo/bar.py#L10-L20")), "C:/foo/bar.py")
 
 
 if __name__ == "__main__":

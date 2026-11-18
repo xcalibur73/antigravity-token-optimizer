@@ -147,6 +147,114 @@ class TestTranscriptAnalyzer(unittest.TestCase):
             self.assertIn("Optimize Antigravity tokens", handoff)
             self.assertIn("/repo/app.py", handoff)
 
+    def test_v232_planner_response_top_level_tokens_and_tail_health(self):
+        from tools.transcript_analyzer import inspect_tail_health
+
+        single_step_path = self._write_jsonl([
+            {
+                "step_index": 0,
+                "type": "PLANNER_RESPONSE",
+                "input_tokens": 1000,
+                "cache_read_tokens": 9000,
+                "output_tokens": 200,
+            }
+        ])
+        multi_step_path = self._write_jsonl([
+            {
+                "step_index": 0,
+                "type": "PLANNER_RESPONSE",
+                "input_tokens": 1000,
+                "cache_read_tokens": 9000,
+                "output_tokens": 200,
+            },
+            {
+                "step_index": 1,
+                "type": "PLANNER_RESPONSE",
+                "usageMetadata": {},
+                "input_tokens": 1000,
+                "cache_read_tokens": 0,
+                "output_tokens": 50,
+            },
+        ])
+        try:
+            single_report = analyze_transcript(single_step_path)
+            self.assertEqual(single_report["steps_with_usage_metadata"], 1)
+            self.assertEqual(single_report["measured_tokens"]["prompt_tokens"], 10000)
+            self.assertEqual(single_report["measured_tokens"]["cached_tokens"], 9000)
+            self.assertEqual(single_report["measured_tokens"]["uncached_tokens"], 1000)
+            self.assertEqual(single_report["measured_tokens"]["output_tokens"], 200)
+            self.assertEqual(single_report["measured_tokens"]["cache_hit_rate_pct"], 90.0)
+
+            single_tail = inspect_tail_health(single_step_path)
+            self.assertEqual(
+                single_tail["latest_usage"],
+                {"prompt_tokens": 10000, "cached_tokens": 9000, "output_tokens": 200},
+            )
+
+            multi_report = analyze_transcript(multi_step_path)
+            self.assertEqual(multi_report["steps_with_usage_metadata"], 2)
+            self.assertEqual(multi_report["measured_tokens"]["prompt_tokens"], 11000)
+            self.assertEqual(multi_report["measured_tokens"]["cached_tokens"], 9000)
+            self.assertEqual(multi_report["measured_tokens"]["uncached_tokens"], 2000)
+            self.assertEqual(multi_report["measured_tokens"]["output_tokens"], 250)
+            self.assertEqual(multi_report["measured_tokens"]["latest_prompt_tokens"], 1000)
+
+            multi_tail = inspect_tail_health(multi_step_path)
+            self.assertEqual(
+                multi_tail["latest_usage"],
+                {"prompt_tokens": 1000, "cached_tokens": 0, "output_tokens": 50},
+            )
+        finally:
+            for p in (single_step_path, multi_step_path):
+                if p.exists():
+                    p.unlink()
+
+    def test_v232_generic_command_output_and_path_unquoting(self):
+        from tools.transcript_analyzer import generate_handoff_summary
+
+        generic_output = "Command exited with code 0.\n" + "\n".join(f"row {i}" for i in range(40))
+        records = [
+            {
+                "step_index": 0,
+                "type": "PLANNER_RESPONSE",
+                "input_tokens": 500,
+                "cache_read_tokens": 0,
+                "output_tokens": 80,
+                "tool_calls": [
+                    {"name": "read_file", "arguments": {"Path": '"/repo/app.py"'}},
+                    {"name": "read_file", "arguments": {"Path": "/repo/bounded.py", "start_line": 1, "end_line": 50}},
+                    {"name": "write_file", "arguments": {"Path": "/repo/new_file.py"}},
+                    {"name": "edit_file", "arguments": {"Path": '"/repo/edited.py"'}},
+                ],
+            },
+            {
+                "step_index": 1,
+                "type": "GENERIC",
+                "content": generic_output,
+            },
+        ]
+        path = self._write_jsonl(records)
+        try:
+            report = analyze_transcript(path)
+            oversized = report["findings"]["oversized_outputs_over_30_lines"]
+            self.assertEqual(len(oversized), 1)
+            self.assertEqual(oversized[0]["step_index"], 1)
+            self.assertEqual(
+                report["findings"]["unbounded_view_file_calls"],
+                [{"step_index": 0, "path": "/repo/app.py"}],
+            )
+
+            handoff = generate_handoff_summary(path)
+            self.assertIn("- `/repo/new_file.py`", handoff)
+            self.assertIn("- `/repo/edited.py`", handoff)
+            self.assertIn("- `/repo/app.py`", handoff)
+            self.assertIn("- `/repo/bounded.py`", handoff)
+            self.assertNotIn('"/repo/app.py"', handoff)
+            self.assertNotIn('"/repo/edited.py"', handoff)
+        finally:
+            if path.exists():
+                path.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()
