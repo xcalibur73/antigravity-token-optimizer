@@ -94,6 +94,58 @@ class TestTranscriptAnalyzer(unittest.TestCase):
             if path.exists():
                 path.unlink()
 
+    def test_discovery_tail_health_loops_and_handoff(self):
+        from tools.transcript_analyzer import (
+            discover_transcripts,
+            generate_handoff_summary,
+            inspect_tail_health,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            log_dir = fake_home / ".gemini" / "jetski" / "brain" / "conv-1234" / ".system_generated" / "logs"
+            log_dir.mkdir(parents=True)
+            log_path = log_dir / "transcript.jsonl"
+
+            records = [
+                {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>Optimize Antigravity tokens</USER_REQUEST>"},
+                {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Reading", "tool_calls": [
+                    {"name": "replace_file_content", "arguments": {"TargetFile": "/repo/app.py"}}
+                ]},
+            ]
+            # Pad with identical repeated tool calls to trigger redundant_tool_loops and multi-chunk tail seek
+            for i in range(2, 20):
+                records.append({
+                    "step_index": i,
+                    "type": "PLANNER_RESPONSE",
+                    "content": "Retrying " + ("x" * 5000),
+                    "usageMetadata": {"promptTokenCount": 50000 + i * 1000, "cachedContentTokenCount": 40000, "candidatesTokenCount": 50},
+                    "tool_calls": [{"name": "run_command", "arguments": {"CommandLine": "pytest"}}],
+                })
+            with open(log_path, "w", encoding="utf-8") as f:
+                for rec in records:
+                    f.write(json.dumps(rec) + "\n")
+
+            discovered = discover_transcripts(home_dir=fake_home)
+            self.assertEqual(len(discovered), 1)
+            self.assertEqual(discovered[0]["runtime"], "cli")
+            self.assertIn("Optimize Antigravity tokens", discovered[0]["title"])
+
+            report = analyze_transcript(log_path, context_limit=100_000)
+            self.assertGreaterEqual(len(report["findings"]["redundant_tool_loops"]), 1)
+            self.assertEqual(len(report["findings"]["top_consumers"]), 5)
+            self.assertEqual(report["context_health"]["status"], "Moderate")
+
+            tail = inspect_tail_health(log_path, context_limit=100_000, chunk_bytes=8192)
+            self.assertLess(tail["tail_bytes_scanned"], tail["file_size_bytes"])
+            self.assertEqual(tail["latest_usage"]["prompt_tokens"], 69000)
+            self.assertEqual(tail["health"], "Moderate")
+
+            handoff = generate_handoff_summary(log_path)
+            self.assertIn("<CONTEXT_SUMMARY>", handoff)
+            self.assertIn("Optimize Antigravity tokens", handoff)
+            self.assertIn("/repo/app.py", handoff)
+
 
 if __name__ == "__main__":
     unittest.main()

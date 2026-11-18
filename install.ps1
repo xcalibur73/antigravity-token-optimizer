@@ -1,13 +1,19 @@
 # Antigravity Token Optimizer - One-Line Automated Installer
 # Target: Windows PowerShell 5.1+ and PowerShell 7+
 # Usage:
-#   Local:   .\install.ps1 [-TargetRulesPath <path>] [-DryRun] [-WhatIf]
+#   Local:   .\install.ps1 [-TargetRulesPath <path>] [-WithHooks] [-TargetHooksPath <path>] [-DryRun] [-WhatIf]
 #   Remote:  irm https://raw.githubusercontent.com/xcalibur73/antigravity-token-optimizer/main/install.ps1 | iex
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
     [string]$TargetRulesPath = "",
+
+    [Parameter(Mandatory = $false)]
+    [switch]$WithHooks,
+
+    [Parameter(Mandatory = $false)]
+    [string]$TargetHooksPath = "",
 
     [Parameter(Mandatory = $false)]
     [switch]$WhatIf,
@@ -167,6 +173,24 @@ function Locate-PrefixLinter {
     return $null
 }
 
+function Get-PreToolHookScript {
+    param([string]$ScriptDir)
+
+    if ($ScriptDir -and (Test-Path -Path (Join-Path $ScriptDir "tools\antigravity_pretool_hook.py"))) {
+        $path = Join-Path $ScriptDir "tools\antigravity_pretool_hook.py"
+        return [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
+    }
+
+    if (Test-Path -Path "tools\antigravity_pretool_hook.py") {
+        return [System.IO.File]::ReadAllText("tools\antigravity_pretool_hook.py", [System.Text.Encoding]::UTF8)
+    }
+
+    $remoteUrl = "https://raw.githubusercontent.com/xcalibur73/antigravity-token-optimizer/main/tools/antigravity_pretool_hook.py"
+    $webClient = New-Object System.Net.WebClient
+    $webClient.Encoding = [System.Text.Encoding]::UTF8
+    return $webClient.DownloadString($remoteUrl)
+}
+
 # -----------------------------------------------------------------------------
 # Main Execution Flow
 # -----------------------------------------------------------------------------
@@ -187,7 +211,7 @@ if ([string]::IsNullOrWhiteSpace($target)) {
     } elseif (-not [string]::IsNullOrWhiteSpace($env:AGY_RULES_PATH)) {
         $target = $env:AGY_RULES_PATH
     } else {
-        $target = [System.IO.Path]::Combine($HOME, ".gemini", "config", "rules", "AGENTS.md")
+        $target = [System.IO.Path]::Combine($HOME, ".gemini", "config", "AGENTS.md")
     }
 }
 
@@ -211,47 +235,32 @@ $targetExists = Test-Path -Path $resolvedTarget -PathType Leaf
 if ($targetExists) {
     $existingText = [System.IO.File]::ReadAllText($resolvedTarget, [System.Text.Encoding]::UTF8)
     $hasInvariants = $existingText.Contains("Prompt Caching Engine and Strict Prefix Invariance") -or $existingText.Contains("Google Antigravity Agent Constitution")
-    
+
     if ($hasInvariants) {
         Write-Host "Status: Target rules file already contains Antigravity Invariants."
-        Write-Host "Action: System is already optimized. Exiting cleanly without modification."
-        
-        # Verify linter on existing file
-        $linter = Locate-PrefixLinter -ScriptDir $scriptDir
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if ($linter -and $pythonCmd) {
-            Write-Host "Running prefix linter audit..."
-            $lintOutput = & python $linter $resolvedTarget 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                Write-Error "Prefix linter audit failed with exit code $($LASTEXITCODE):`n$lintOutput"
-                exit $LASTEXITCODE
-            }
-            Write-Host "Verification result: PASSED (exit code 0)."
-        }
-        Write-Host "=================================================="
-        return
-    }
-
-    # Backup existing file before modification
-    $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
-    $backupPath = "$resolvedTarget.bak.$timestamp"
-    if (Test-Path -Path $backupPath) {
-        $backupPath = "$resolvedTarget.bak.${timestamp}_1"
-    }
-
-    if ($WhatIf) {
-        Write-Host "[WHAT-IF] Existing rules file detected. Would create backup copy: $backupPath"
-        Write-Host "[WHAT-IF] Would append Antigravity Invariants to: $resolvedTarget"
+        Write-Host "Action: Rules file already optimized."
     } else {
-        Copy-Item -Path $resolvedTarget -Destination $backupPath -Force
-        Write-Host "Non-destructive backup created: $backupPath"
+        # Backup existing file before modification
+        $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
+        $backupPath = "$resolvedTarget.bak.$timestamp"
+        if (Test-Path -Path $backupPath) {
+            $backupPath = "$resolvedTarget.bak.${timestamp}_1"
+        }
 
-        # Cleanly append invariants
-        $trimmedExisting = $existingText.TrimEnd()
-        $updatedText = $trimmedExisting + [System.Environment]::NewLine + [System.Environment]::NewLine + $rulesToAdd.Trim() + [System.Environment]::NewLine
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($resolvedTarget, $updatedText, $utf8NoBom)
-        Write-Host "Injected Antigravity Token Optimizer invariants into: $resolvedTarget"
+        if ($WhatIf) {
+            Write-Host "[WHAT-IF] Existing rules file detected. Would create backup copy: $backupPath"
+            Write-Host "[WHAT-IF] Would append Antigravity Invariants to: $resolvedTarget"
+        } else {
+            Copy-Item -Path $resolvedTarget -Destination $backupPath -Force
+            Write-Host "Non-destructive backup created: $backupPath"
+
+            # Cleanly append invariants
+            $trimmedExisting = $existingText.TrimEnd()
+            $updatedText = $trimmedExisting + [System.Environment]::NewLine + [System.Environment]::NewLine + $rulesToAdd.Trim() + [System.Environment]::NewLine
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($resolvedTarget, $updatedText, $utf8NoBom)
+            Write-Host "Injected Antigravity Token Optimizer invariants into: $resolvedTarget"
+        }
     }
 } else {
     # Target does not exist yet
@@ -264,6 +273,72 @@ if ($targetExists) {
     }
 }
 
+# Step 2b: Optional PreToolUse Hook Registration
+if ($WithHooks) {
+    $hooksTarget = $TargetHooksPath
+    if ([string]::IsNullOrWhiteSpace($hooksTarget)) {
+        if (-not [string]::IsNullOrWhiteSpace($env:ANTIGRAVITY_HOOKS_PATH)) {
+            $hooksTarget = $env:ANTIGRAVITY_HOOKS_PATH
+        } else {
+            $hooksTarget = [System.IO.Path]::Combine($HOME, ".gemini", "config", "hooks.json")
+        }
+    }
+    $resolvedHooks = [System.IO.Path]::GetFullPath($hooksTarget)
+    $hooksDir = [System.IO.Path]::GetDirectoryName($resolvedHooks)
+    $hookDest = [System.IO.Path]::Combine($hooksDir, "tools", "antigravity_pretool_hook.py")
+
+    if ($WhatIf) {
+        Write-Host "[WHAT-IF] Would install PreToolUse hook script to: $hookDest"
+        Write-Host "[WHAT-IF] Would register 'token-optimizer' PreToolUse hook in: $resolvedHooks"
+    } else {
+        $hookContent = Get-PreToolHookScript -ScriptDir $scriptDir
+        $hookDestDir = [System.IO.Path]::GetDirectoryName($hookDest)
+        if (-not (Test-Path -Path $hookDestDir)) {
+            [System.IO.Directory]::CreateDirectory($hookDestDir) | Out-Null
+        }
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($hookDest, $hookContent.TrimEnd() + "`n", $utf8NoBom)
+        Write-Host "Installed PreToolUse hook script: $hookDest"
+
+        $hooksObj = New-Object PSObject
+        if (Test-Path -Path $resolvedHooks -PathType Leaf) {
+            $bakStamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
+            $hooksBackup = "$resolvedHooks.bak.$bakStamp"
+            Copy-Item -Path $resolvedHooks -Destination $hooksBackup -Force
+            Write-Host "Non-destructive hooks backup created: $hooksBackup"
+            $rawHooks = [System.IO.File]::ReadAllText($resolvedHooks, [System.Text.Encoding]::UTF8)
+            if (-not [string]::IsNullOrWhiteSpace($rawHooks)) {
+                $hooksObj = $rawHooks | ConvertFrom-Json
+            }
+        }
+
+        $pythonBin = "python"
+        if (Get-Command python3 -ErrorAction SilentlyContinue) {
+            $pythonBin = "python3"
+        }
+
+        $hookEntry = [PSCustomObject]@{
+            enabled    = $true
+            PreToolUse = @(
+                [PSCustomObject]@{
+                    matcher = "view_file|read_file|run_command"
+                    hooks   = @(
+                        [PSCustomObject]@{
+                            type    = "command"
+                            command = "$pythonBin `"$hookDest`""
+                            timeout = 10
+                        }
+                    )
+                }
+            )
+        }
+        $hooksObj | Add-Member -MemberType NoteProperty -Name "token-optimizer" -Value $hookEntry -Force
+        $serializedHooks = ($hooksObj | ConvertTo-Json -Depth 10) + "`n"
+        [System.IO.File]::WriteAllText($resolvedHooks, $serializedHooks, $utf8NoBom)
+        Write-Host "Registered PreToolUse guardrail hook in: $resolvedHooks"
+    }
+}
+
 # Step 3: Verification Audit
 if ($WhatIf) {
     Write-Host "[WHAT-IF] Dry run completed successfully. Zero changes committed."
@@ -273,9 +348,12 @@ if ($WhatIf) {
 
 $linterPath = Locate-PrefixLinter -ScriptDir $scriptDir
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+if (-not $pythonCmd) {
+    $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue
+}
 if ($linterPath -and $pythonCmd) {
     Write-Host "Running prefix linter audit..."
-    $lintOutput = & python $linterPath $resolvedTarget 2>&1
+    $lintOutput = & $pythonCmd.Source $linterPath $resolvedTarget 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Prefix linter audit failed with exit code $($LASTEXITCODE):`n$lintOutput"
         exit $LASTEXITCODE

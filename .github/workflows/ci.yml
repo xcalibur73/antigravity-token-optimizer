@@ -36,8 +36,12 @@ jobs:
 
       - name: Test POSIX installer (dry-run)
         if: runner.os != 'Windows'
-        run: bash install.sh --dry-run
+        run: |
+          bash install.sh --dry-run
+          bash install.sh --with-hooks --dry-run
 
       - name: Test Windows PowerShell installer (dry-run)
         if: runner.os == 'Windows'
-        run: powershell -ExecutionPolicy Bypass -File install.ps1 -DryRun
+        run: |
+          powershell -ExecutionPolicy Bypass -File install.ps1 -DryRun
+          powershell -ExecutionPolicy Bypass -File install.ps1 -WithHooks -DryRun

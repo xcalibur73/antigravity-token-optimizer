@@ -1,20 +1,27 @@
 {
-  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "antigravity-token-optimizer",
-  "version": "1.1.0",
-  "description": "Strict Gemini KV prompt caching and token optimization invariants for Google Antigravity.",
+  "displayName": "Token Optimizer",
+  "version": "1.2.0",
+  "description": "Strict Gemini KV prompt caching, deterministic schema ordering, PreToolUse context guardrails, and transcript auditing for Google Antigravity.",
   "author": {
     "name": "xcalibur73"
   },
   "homepage": "https://github.com/xcalibur73/antigravity-token-optimizer",
   "repository": "https://github.com/xcalibur73/antigravity-token-optimizer",
   "license": "MIT",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Audit this workspace with tools/antigravity_prefix_linter.py --strict",
+    "Inspect my latest Antigravity transcript for KV cache hits and context waste",
+    "Sort and compress MCP tool schemas deterministically without losing descriptions"
+  ],
   "keywords": [
     "antigravity",
     "token-optimizer",
     "prompt-caching",
-    "gemini-3.8-flash",
     "kv-cache",
-    "prefix-invariance"
+    "prefix-invariance",
+    "transcript-audit"
   ]
 }

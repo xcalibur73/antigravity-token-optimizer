@@ -261,5 +261,53 @@ class TestPrefixLinterEvasionAttempts(unittest.TestCase):
                 os.unlink(temp_path)
 
 
+class TestAntigravityRuleAndPluginChecks(unittest.TestCase):
+    """Test Antigravity-specific rules frontmatter, globs, 24KB limit, budget, and plugin.json checks."""
+
+    def test_modular_rule_requires_trigger_frontmatter(self):
+        from tools.antigravity_prefix_linter import check_rules_budget
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rules_dir = Path(tmp) / ".agents" / "rules"
+            rules_dir.mkdir(parents=True)
+            bad_rule = rules_dir / "style.md"
+            bad_rule.write_text("# Style\nKeep code clean.\n", encoding="utf-8")
+            violations = check_file(bad_rule, strict=True)
+            self.assertIn("RULE_MISSING_TRIGGER", [v["rule"] for v in violations])
+
+            good_rule = rules_dir / "good.md"
+            good_rule.write_text("---\ntrigger: glob\nglobs: \"*.py, *.ts\"\n---\n# Style\n", encoding="utf-8")
+            self.assertEqual(check_file(good_rule, strict=True), [])
+
+            yaml_list_rule = rules_dir / "bad_globs.md"
+            yaml_list_rule.write_text("---\ntrigger: glob\nglobs:\n  - \"*.py\"\n---\n# Bad\n", encoding="utf-8")
+            self.assertIn("RULE_GLOBS_YAML_LIST", [v["rule"] for v in check_file(yaml_list_rule, strict=True)])
+
+            # > 24KB rule triggers RULE_EXCEEDS_24KB
+            huge_rule = rules_dir / "huge.md"
+            huge_rule.write_text("---\ntrigger: always_on\n---\n" + ("a" * 25000) + "\n", encoding="utf-8")
+            self.assertIn("RULE_EXCEEDS_24KB", [v["rule"] for v in check_file(huge_rule, strict=True)])
+
+            # > 20K tokens across always_on rules triggers RULES_BUDGET_EXCEEDED
+            giant_a = rules_dir / "giant_a.md"
+            giant_a.write_text("---\ntrigger: always_on\n---\n" + ("b" * 45000) + "\n", encoding="utf-8")
+            giant_b = rules_dir / "giant_b.md"
+            giant_b.write_text("---\ntrigger: always_on\n---\n" + ("c" * 45000) + "\n", encoding="utf-8")
+            budget_violations = check_rules_budget([giant_a, giant_b], strict=True)
+            self.assertIn("RULES_BUDGET_EXCEEDED", [v["rule"] for v in budget_violations])
+
+    def test_plugin_json_constraints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pjson = Path(tmp) / "plugin.json"
+            pjson.write_text(json.dumps({
+                "name": "my-plugin",
+                "displayName": "Antigravity Helper",
+                "suggestedPrompts": ["1", "2", "3", "4"],
+            }), encoding="utf-8")
+            rules = [v["rule"] for v in check_file(pjson, strict=True)]
+            self.assertIn("PLUGIN_INVALID_DISPLAY_NAME", rules)
+            self.assertIn("PLUGIN_TOO_MANY_PROMPTS", rules)
+
+
 if __name__ == "__main__":
     unittest.main()

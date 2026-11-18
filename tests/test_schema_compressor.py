@@ -391,6 +391,44 @@ class TestSchemaCompressorCLI(unittest.TestCase):
         self.assertEqual(metrics["chars_saved"], 8)
         self.assertEqual(metrics["pct_reduction"], 50.0)
 
+    def test_instructions_markdown_normalization_and_cli_check(self):
+        """MCP instructions.md normalization must collapse excessive whitespace deterministically."""
+        from tools.mcp_schema_compressor import compress_instructions_markdown
+
+        raw_md = "# Server Instructions   \r\n\r\n\r\n\r\nUse tools safely.  \r\n"
+        norm = compress_instructions_markdown(raw_md)
+        self.assertEqual(norm, "# Server Instructions\n\nUse tools safely.\n")
+        self.assertEqual(compress_instructions_markdown(norm), norm)
+
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write(raw_md)
+            temp_path = f.name
+
+        try:
+            res_fail = subprocess.run(
+                [sys.executable, self.script_path, "--input", temp_path, "--check"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res_fail.returncode, 1)
+
+            res_fix = subprocess.run(
+                [sys.executable, self.script_path, "--input", temp_path, "--in-place"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res_fix.returncode, 0)
+
+            res_pass = subprocess.run(
+                [sys.executable, self.script_path, "--input", temp_path, "--check"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res_pass.returncode, 0)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
 
 if __name__ == "__main__":
     unittest.main()

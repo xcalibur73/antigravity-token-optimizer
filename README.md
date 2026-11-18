@@ -10,28 +10,33 @@ By enforcing the 7 Antigravity Invariants—and verifying them with static prefi
 
 ## 10-Second Quickstart
 
-Install the Antigravity Token Optimizer invariants non-destructively into your global Antigravity rules configuration (`$HOME/.gemini/config/rules/AGENTS.md` by default):
+Install the Antigravity Token Optimizer invariants non-destructively into your global Antigravity rules configuration (`$HOME/.gemini/config/AGENTS.md` by default):
 
 ### Linux / macOS (bash)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xcalibur73/antigravity-token-optimizer/main/install.sh | bash
+# Optional: also install and register the PreToolUse guardrail hook in ~/.gemini/config/hooks.json
+./install.sh --with-hooks
 ```
 
 ### Windows PowerShell
 
 ```powershell
 irm https://raw.githubusercontent.com/xcalibur73/antigravity-token-optimizer/main/install.ps1 | iex
+# Optional: also install and register the PreToolUse guardrail hook in $HOME\.gemini\config\hooks.json
+.\install.ps1 -WithHooks
 ```
 
 ### Non-Destructive Backup Protection
 
 Both `install.sh` and `install.ps1` guarantee safety through non-destructive execution:
-1. Target Resolution: Defaults to `$HOME/.gemini/config/rules/AGENTS.md`, with overrides via `ANTIGRAVITY_RULES_PATH` / `AGY_RULES_PATH` (or `--target` / `-TargetRulesPath`).
-2. Non-Destructive Backup: If an existing rules file is found, a timestamped backup copy (`AGENTS.md.bak.<yyyyMMdd_HHmmss>`) is created before any modifications.
+1. Target Resolution: Defaults to `$HOME/.gemini/config/AGENTS.md` (frontmatter-free global rules path loaded directly by Antigravity), with overrides via `ANTIGRAVITY_RULES_PATH` / `AGY_RULES_PATH` (or `--target` / `-TargetRulesPath`).
+2. Non-Destructive Backup: If an existing rules or `hooks.json` file is found, a timestamped backup copy (`*.bak.<yyyyMMdd_HHmmss>`) is created before any modifications.
 3. Idempotent Invariant Injection: Scans the target file to check whether Antigravity Invariants already exist. If present, it exits cleanly without duplicating rules.
-4. Automated Verification: Runs `tools/antigravity_prefix_linter.py` on the resulting rules file when Python is available.
-5. Dry-Run Support: Pass `--dry-run` (`install.sh`) or `-DryRun` / `-WhatIf` (`install.ps1`) to preview actions without writing to disk.
+4. Opt-In `PreToolUse` Guardrails: Pass `--with-hooks` (`install.sh`) or `-WithHooks` (`install.ps1`) to register [`tools/antigravity_pretool_hook.py`](tools/antigravity_pretool_hook.py) in `$HOME/.gemini/config/hooks.json`.
+5. Automated Verification: Runs `tools/antigravity_prefix_linter.py` on the resulting rules file when Python is available.
+6. Dry-Run Support: Pass `--dry-run` (`install.sh`) or `-DryRun` / `-WhatIf` (`install.ps1`) to preview actions without writing to disk.
 
 ## Core Architecture: The Antigravity Prompt Caching Engine
 
@@ -102,6 +107,7 @@ Linux / macOS:
 ```bash
 ./install.sh --dry-run
 ./install.sh
+./install.sh --with-hooks
 ./install.sh --target /custom/path/AGENTS.md
 ```
 
@@ -109,11 +115,12 @@ Windows PowerShell:
 ```powershell
 .\install.ps1 -DryRun
 .\install.ps1
+.\install.ps1 -WithHooks
 .\install.ps1 -TargetRulesPath "C:\custom\path\AGENTS.md"
 ```
 
 ### Option 2: Repository-Level Installation
-Copy `rules/AGENTS.md` to `.agents/rules/AGENTS.md` in a repository to scope the invariants per project.
+Copy `rules/AGENTS.md` to `AGENTS.md` at your workspace root (frontmatter-free), or add YAML frontmatter (`---\ntrigger: always_on\n---`) when placing modular rules inside `.agents/rules/`.
 
 ### Option 3: Native Antigravity Plugin Installation
 ```bash
@@ -125,7 +132,7 @@ agy plugin install github:xcalibur73/antigravity-token-optimizer
 ## CLI Tools (Python Standard Library Only)
 
 ### 1. Antigravity Prefix Linter (`tools/antigravity_prefix_linter.py`)
-Audits prompt templates, rule files, code, and tool schemas for dynamic timestamps, UUIDs, session assignments, in-place prompt mutations, unsorted tool lists, and unsorted JSON schema keys. Supports `<!-- DYNAMIC_TAIL -->` tail boundaries and `# prefix-linter: ignore` inline suppressions.
+Audits prompt templates, rule files, `plugin.json`, code, and tool schemas for dynamic timestamps, UUIDs, session assignments, in-place prompt mutations, unsorted tool lists, unsorted JSON schema keys, missing `trigger:` frontmatter in modular `rules/*.md`, YAML list `globs:`, Antigravity's 24,000-byte per-rule limit, and the 20,000-token global rules budget. Supports `<!-- DYNAMIC_TAIL -->` tail boundaries and `# prefix-linter: ignore` inline suppressions.
 
 ```bash
 python tools/antigravity_prefix_linter.py . --strict
@@ -135,14 +142,15 @@ python tools/antigravity_prefix_linter.py . --include-tests
 ```
 
 ### 2. MCP Schema Compressor (`tools/mcp_schema_compressor.py`)
-Enforces Invariant 6 (Deterministic Tool Schema Ordering) and prunes nulls, `$schema` boilerplate, redundant `title`s, and empty containers. **Lossless by default** (preserves full tool descriptions); pass `--condense-descriptions` to opt into single-sentence docstring condensation with constraint extraction.
+Enforces Invariant 6 (Deterministic Tool Schema Ordering) and prunes nulls, `$schema` boilerplate, redundant `title`s, and empty containers. **Lossless by default** (preserves full tool descriptions and supports MCP `instructions.md` normalization); pass `--condense-descriptions` to opt into single-sentence docstring condensation with constraint extraction.
 
 ```bash
 # Lossless deterministic sorting + pruning with token metrics
 python tools/mcp_schema_compressor.py --input schema.json --info
 
-# Lossless in-place sort & prune
+# Lossless in-place sort & prune (JSON schemas or MCP instructions.md)
 python tools/mcp_schema_compressor.py --input schema.json --in-place
+python tools/mcp_schema_compressor.py --input instructions.md --in-place
 
 # Opt-in aggressive docstring condensation + minification
 python tools/mcp_schema_compressor.py --input schema.json --output minified.json --condense-descriptions --minify
@@ -152,18 +160,24 @@ python tools/mcp_schema_compressor.py --input schema.json --check
 ```
 
 ### 3. Transcript Analyzer (`tools/transcript_analyzer.py`)
-Audits real JSONL conversation transcripts for measured `usageMetadata` cache hit rates, oversized unredacted outputs (> 30 lines), unbounded file reads, and polling loops:
+Auto-discovers Antigravity `transcript.jsonl` files across CLI (`~/.gemini/jetski/brain`), Desktop (`~/.gemini/antigravity/brain`), and IDE (`~/.gemini/antigravity-ide/brain`) to measure KV cache hit rates, run `O(1)` reverse byte-seek `--tail` health checks, identify Top-5 token consumers, flag oversized outputs (> 30 lines), unbounded `view_file` reads, polling loops, and redundant tool loops, and generate `<CONTEXT_SUMMARY>` `--handoff` prompts:
 
 ```bash
-python tools/transcript_analyzer.py /path/to/transcript.jsonl
+python tools/transcript_analyzer.py --list
+python tools/transcript_analyzer.py --latest
+python tools/transcript_analyzer.py --latest --tail
+python tools/transcript_analyzer.py --latest --handoff
 python tools/transcript_analyzer.py /path/to/transcript.jsonl --json
 ```
 
-### 4. Pattern Demonstrations (`examples/`)
+### 4. `PreToolUse` Guardrail Hook (`tools/antigravity_pretool_hook.py`)
+Zero-dependency Antigravity `PreToolUse` hook (`allow`/`deny`, ACP/IDE/CLI compatible) enforcing Invariant 4 (blocking unbounded `view_file`/`read_file` reads > 150 lines or 12 KB) and Invariant 3 (blocking bare `cat`/`Get-Content`/`type` dumps on large logs). Installed into `~/.gemini/config/hooks.json` via `--with-hooks` / `-WithHooks` (set `TOKEN_OPTIMIZER_HOOK_BYPASS=1` for emergency bypass).
+
+### 5. Pattern Demonstrations (`examples/`)
 - `python examples/reactive_watchdog_pattern.py` — Demonstrates coordinator yield + watchdog teardown.
 - `powershell -ExecutionPolicy Bypass -File examples/terminal_distillation_pattern.ps1` — Demonstrates PowerShell stream redirection and Head-and-Tail pointers.
 
-### 5. Unit Test Suite
+### 6. Unit Test Suite
 ```bash
 python -m unittest discover -s tests -v
 ```
@@ -171,10 +185,10 @@ python -m unittest discover -s tests -v
 ## Continuous Integration
 
 `.github/workflows/ci.yml` runs across `ubuntu-latest` and `windows-latest` on Python 3.10 and 3.12:
-1. Full unit test suite (`python -m unittest discover -s tests -v`), including `install.ps1` embedded rules parity verification.
-2. Strict repository-wide prefix lint (`python tools/antigravity_prefix_linter.py . --strict`).
+1. Full unit test suite (`python -m unittest discover -s tests -v`), including `install.ps1` embedded rules parity verification and `PreToolUse` hook tests.
+2. Strict repository-wide prefix & Antigravity rule/plugin lint (`python tools/antigravity_prefix_linter.py . --strict`).
 3. Workload simulation execution (`python proof/benchmark_proof.py`).
-4. Dry-run validation of `install.sh --dry-run` (Ubuntu) and `install.ps1 -DryRun` (Windows).
+4. Dry-run validation of `install.sh --dry-run` / `--with-hooks --dry-run` (Ubuntu) and `install.ps1 -DryRun` / `-WithHooks -DryRun` (Windows).
 
 ## Repository Structure
 
@@ -189,6 +203,10 @@ antigravity-token-optimizer/
 |-- install.ps1                            # Non-destructive Windows PowerShell installer
 |-- install.sh                             # Non-destructive POSIX (Linux/macOS) installer
 |-- plugin.json                            # Native Antigravity plugin manifest
+|-- agents/
+|   `-- context-auditor.md                 # Dedicated read-only Antigravity audit subagent
+|-- assets/
+|   `-- logo.svg                           # 1:1 square Antigravity Marketplace plugin logo
 |-- rules/
 |   `-- AGENTS.md                          # Cross-platform Antigravity invariant rules
 |-- skills/
@@ -198,14 +216,16 @@ antigravity-token-optimizer/
 |   |-- benchmark_proof.py                 # Analytical 25-turn workload simulation
 |   `-- proof_results.json                 # Exported simulation data
 |-- tools/
-|   |-- antigravity_prefix_linter.py       # Prefix invariance & schema key ordering linter
-|   |-- mcp_schema_compressor.py           # Deterministic tool schema sorter & compressor
-|   `-- transcript_analyzer.py             # Real JSONL transcript & KV-cache auditor
+|   |-- antigravity_prefix_linter.py       # Prefix, rule budget, and plugin.json linter
+|   |-- antigravity_pretool_hook.py        # Opt-in PreToolUse guardrail hook (Invariants 3 & 4)
+|   |-- mcp_schema_compressor.py           # Deterministic tool schema & instructions.md compressor
+|   `-- transcript_analyzer.py             # Multi-runtime transcript auditor & --handoff generator
 |-- tests/
-|   |-- test_prefix_linter.py              # Linter unit & regression tests
+|   |-- test_prefix_linter.py              # Linter unit & Antigravity rule tests
+|   |-- test_pretool_hook.py               # PreToolUse guardrail hook unit tests
 |   |-- test_repo_consistency.py           # Cross-file parity & lint cleanliness tests
-|   |-- test_schema_compressor.py          # Schema compressor & CLI tests
-|   `-- test_transcript_analyzer.py        # Transcript analyzer unit tests
+|   |-- test_schema_compressor.py          # Schema & instructions.md compressor tests
+|   `-- test_transcript_analyzer.py        # Transcript discovery, tail & handoff tests
 `-- examples/
     |-- reactive_watchdog_pattern.py       # Event scheduling and watchdog pattern
     `-- terminal_distillation_pattern.ps1  # PowerShell stream redirection pattern

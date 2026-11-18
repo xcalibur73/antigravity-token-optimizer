@@ -204,6 +204,16 @@ def compress_schema(data, condense=False):
     return compress_schema_node(data, condense=condense)
 
 
+def compress_instructions_markdown(text: str) -> str:
+    """Losslessly normalize MCP instructions.md files (CRLF->LF, strip trailing whitespace, collapse 3+ blank lines)."""
+    if not text:
+        return ""
+    normalized_lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    joined = "\n".join(normalized_lines)
+    collapsed = re.sub(r"\n{3,}", "\n\n", joined).strip()
+    return (collapsed + "\n") if collapsed else ""
+
+
 def serialize_schema(data, minify=False):
     """Serialize schema data to JSON string."""
     if minify:
@@ -244,7 +254,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Google Antigravity MCP Schema Compressor: Enforce deterministic tool ordering and compress schemas."
     )
-    parser.add_argument("-i", "--input", help="Input JSON file path (defaults to stdin if omitted)")
+    parser.add_argument("-i", "--input", help="Input JSON or instructions.md file path (defaults to stdin if omitted)")
     parser.add_argument("-o", "--output", help="Output file path (defaults to stdout)")
     parser.add_argument("--in-place", action="store_true", help="Modify the input file in place")
     parser.add_argument("--minify", action="store_true", help="Output compact JSON without indentation")
@@ -253,17 +263,25 @@ def main():
         action="store_true",
         help="Aggressively condense multi-sentence docstrings into single-sentence noun phrases (opt-in)",
     )
+    parser.add_argument(
+        "--instructions-md",
+        action="store_true",
+        help="Treat input as an MCP instructions.md markdown file (auto-detected for .md inputs)",
+    )
     parser.add_argument("--check", action="store_true", help="Check if schema is already compressed and sorted; exit code 1 if not")
     parser.add_argument("--info", action="store_true", help="Print token economy metrics")
 
     args = parser.parse_args()
 
     # Read input
+    is_markdown = bool(args.instructions_md)
     if args.input and args.input != "-":
         input_path = Path(args.input)
         if not input_path.is_file():
             sys.stderr.write(f"Error: Input file '{args.input}' not found.\n")
             sys.exit(1)
+        if input_path.suffix.lower() in {".md", ".markdown"}:
+            is_markdown = True
         with open(input_path, "r", encoding="utf-8") as f:
             raw_text = f.read()
     else:
@@ -276,18 +294,22 @@ def main():
         sys.stderr.write("Error: Empty input provided.\n")
         sys.exit(1)
 
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        sys.stderr.write(f"Error: Invalid JSON input: {exc}\n")
-        sys.exit(1)
+    if is_markdown:
+        output_text = compress_instructions_markdown(raw_text)
+    else:
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            sys.stderr.write(f"Error: Invalid JSON input: {exc}\n")
+            sys.exit(1)
 
-    compressed_data = compress_schema(data, condense=args.condense_descriptions)
-    output_text = serialize_schema(compressed_data, minify=args.minify)
+        compressed_data = compress_schema(data, condense=args.condense_descriptions)
+        output_text = serialize_schema(compressed_data, minify=args.minify)
+
     metrics = calculate_metrics(raw_text, output_text)
 
     if args.check:
-        is_identical = raw_text.strip() == output_text.strip()
+        is_identical = raw_text.strip() == output_text.strip() if not is_markdown else raw_text == output_text
         if args.info:
             print_metrics(metrics, stream=sys.stderr)
         if is_identical:

@@ -28,6 +28,26 @@ class TestRepoConsistency(unittest.TestCase):
         self.assertEqual(data["name"], "antigravity-token-optimizer")
         self.assertIn("version", data)
         self.assertIn("repository", data)
+        display_name = data.get("displayName", "")
+        self.assertTrue(display_name)
+        self.assertFalse(
+            display_name.lower().startswith(("antigravity", "gemini", "claude", "cursor")),
+            f"displayName '{display_name}' violates Antigravity Marketplace prefix rules",
+        )
+        prompts = data.get("suggestedPrompts", [])
+        self.assertLessEqual(len(prompts), 3)
+        logo = data.get("logo")
+        if logo and not str(logo).startswith("http"):
+            self.assertTrue((REPO_ROOT / logo).is_file(), f"Missing plugin logo asset: {logo}")
+        self.assertTrue((REPO_ROOT / "agents" / "context-auditor.md").is_file())
+
+    def test_installers_use_valid_global_agents_path(self):
+        sh_text = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        ps1_text = (REPO_ROOT / "install.ps1").read_text(encoding="utf-8")
+        self.assertIn('$HOME/.gemini/config/AGENTS.md', sh_text)
+        self.assertNotIn('.gemini/config/rules/AGENTS.md', sh_text)
+        self.assertIn('".gemini", "config", "AGENTS.md"', ps1_text)
+        self.assertNotIn('"rules", "AGENTS.md"', ps1_text)
 
     def test_repo_passes_prefix_linter(self):
         linter = str(REPO_ROOT / "tools" / "antigravity_prefix_linter.py")

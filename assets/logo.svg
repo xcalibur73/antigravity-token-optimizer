@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Token Optimizer Logo">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#34D399"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="24" fill="url(#bg)" stroke="#334155" stroke-width="2"/>
+  <path d="M64 22 L98 37 V65 C98 86 83 102 64 108 C45 102 30 86 30 65 V37 Z" fill="none" stroke="url(#accent)" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M46 52 H82 M64 52 V86" fill="none" stroke="#F8FAFC" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="84" cy="84" r="7" fill="#34D399"/>
+</svg>

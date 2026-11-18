@@ -26,19 +26,23 @@ python tools/antigravity_prefix_linter.py rules/AGENTS.md --strict
 python tools/antigravity_prefix_linter.py path/to/prompts/ --strict
 ```
 
-Sort and compress MCP schemas deterministically (lossless by default; add `--condense-descriptions` to opt into single-sentence docstring condensation):
+Sort and compress MCP schemas deterministically (lossless by default; add `--condense-descriptions` to opt into single-sentence docstring condensation, or pass `instructions.md` directly):
 
 ```bash
 python tools/mcp_schema_compressor.py --input schema.json --output sorted.json --info
 python tools/mcp_schema_compressor.py --input schema.json --in-place
 python tools/mcp_schema_compressor.py --input schema.json --in-place --condense-descriptions
+python tools/mcp_schema_compressor.py --input instructions.md --in-place
 python tools/mcp_schema_compressor.py --input schema.json --check
 ```
 
-Audit real Antigravity JSONL transcripts for KV cache hit rates and context waste:
+Audit real Antigravity JSONL transcripts across CLI (`jetski`), Desktop, and IDE brains:
 
 ```bash
-python tools/transcript_analyzer.py /path/to/transcript.jsonl
+python tools/transcript_analyzer.py --list
+python tools/transcript_analyzer.py --latest
+python tools/transcript_analyzer.py --latest --tail
+python tools/transcript_analyzer.py --latest --handoff
 python tools/transcript_analyzer.py /path/to/transcript.jsonl --json
 ```
 

@@ -300,6 +300,177 @@ def check_tool_ordering(file_path, lines, text):
     return violations
 
 
+VALID_RULE_TRIGGERS = {"always_on", "model_decision", "glob", "manual"}
+FORBIDDEN_PLUGIN_DISPLAY_PREFIXES = ("antigravity", "gemini", "claude", "cursor")
+ANTIGRAVITY_RULE_MAX_BYTES = 24000
+ANTIGRAVITY_RULES_TOKEN_BUDGET = 20000
+
+
+def _parse_yaml_frontmatter(text):
+    """Extract leading YAML frontmatter block if present."""
+    match = re.match(r"^---\r?\n(.*?)\r?\n---(?:\r?\n|$)", text, re.DOTALL)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _is_antigravity_rule_file(path_obj: Path) -> bool:
+    """Identify Antigravity instruction/rule markdown files."""
+    if path_obj.suffix.lower() != ".md":
+        return False
+    name_upper = path_obj.name.upper()
+    parent_name = path_obj.parent.name.lower()
+    return name_upper in {"AGENTS.MD", "GEMINI.MD"} or parent_name == "rules"
+
+
+def _is_plugin_root_rule(path_obj: Path) -> bool:
+    """Plugin-bundled rules/AGENTS.md (or GEMINI.md) beside plugin.json is valid without frontmatter."""
+    if path_obj.name.upper() not in {"AGENTS.MD", "GEMINI.MD"}:
+        return False
+    if path_obj.parent.name.lower() != "rules":
+        return False
+    grandparent = path_obj.parent.parent
+    if grandparent.name.lower() in {".agents", "config"}:
+        return False
+    return (grandparent / "plugin.json").is_file()
+
+
+def _extract_rule_trigger(frontmatter: str):
+    match = re.search(r"^\s*trigger\s*:\s*['\"]?([a-zA-Z0-9_-]+)['\"]?\s*$", frontmatter, re.MULTILINE)
+    return match.group(1).lower() if match else None
+
+
+def check_antigravity_rule_and_plugin(path_obj: Path, full_text: str, lines):
+    """Enforce Antigravity-specific rules frontmatter, 24KB limit, and plugin.json constraints."""
+    violations = []
+
+    if _is_antigravity_rule_file(path_obj):
+        byte_len = len(full_text.encode("utf-8"))
+        if byte_len > ANTIGRAVITY_RULE_MAX_BYTES:
+            violations.append({
+                "file": str(path_obj),
+                "line": 1,
+                "rule": "RULE_EXCEEDS_24KB",
+                "matched": f"{byte_len} bytes",
+                "line_text": lines[0].strip()[:120] if lines else "",
+                "message": f"Antigravity rule file is {byte_len:,} bytes, exceeding the {ANTIGRAVITY_RULE_MAX_BYTES:,}-byte truncation limit.",
+                "severity": "ERROR",
+                "fix": "Split large rules into trigger-scoped modular files or concise imperatives below 24,000 bytes.",
+            })
+
+        frontmatter = _parse_yaml_frontmatter(full_text)
+        is_modular_rules_dir = path_obj.parent.name.lower() == "rules"
+        if is_modular_rules_dir and not _is_plugin_root_rule(path_obj):
+            if frontmatter is None:
+                violations.append({
+                    "file": str(path_obj),
+                    "line": 1,
+                    "rule": "RULE_MISSING_TRIGGER",
+                    "matched": path_obj.name,
+                    "line_text": lines[0].strip()[:120] if lines else "",
+                    "message": "Files inside rules/ (outside a plugin root AGENTS.md) require YAML frontmatter with 'trigger:'. Antigravity silently discards frontmatter-free files in rules/.",
+                    "severity": "ERROR",
+                    "fix": "Add YAML frontmatter with trigger (always_on, model_decision, glob, or manual), or move frontmatter-free AGENTS.md to ~/.gemini/config/AGENTS.md.",
+                })
+            else:
+                trigger = _extract_rule_trigger(frontmatter)
+                if trigger not in VALID_RULE_TRIGGERS:
+                    violations.append({
+                        "file": str(path_obj),
+                        "line": 1,
+                        "rule": "RULE_MISSING_TRIGGER",
+                        "matched": f"trigger={trigger}",
+                        "line_text": lines[0].strip()[:120] if lines else "",
+                        "message": f"Invalid or missing Antigravity rule trigger '{trigger}'. Expected one of {sorted(VALID_RULE_TRIGGERS)}.",
+                        "severity": "ERROR",
+                        "fix": "Set 'trigger: always_on' (or model_decision, glob, manual) in YAML frontmatter.",
+                    })
+
+        if frontmatter and re.search(r"^\s*globs\s*:\s*\r?\n\s*-\s+", frontmatter, re.MULTILINE):
+            line_no = _find_line_for_token(lines, "globs:")
+            violations.append({
+                "file": str(path_obj),
+                "line": line_no,
+                "rule": "RULE_GLOBS_YAML_LIST",
+                "matched": "globs: [...]",
+                "line_text": lines[line_no - 1].strip()[:120] if line_no <= len(lines) else "",
+                "message": "Antigravity requires 'globs:' in rule frontmatter to be a comma-separated string, not a YAML list.",
+                "severity": "ERROR",
+                "fix": 'Replace YAML array with a comma-separated string, e.g. globs: "*.py, *.ts".',
+            })
+
+    if path_obj.name == "plugin.json":
+        try:
+            pdata = json.loads(full_text)
+        except Exception:
+            pdata = None
+        if isinstance(pdata, dict):
+            display_name = pdata.get("displayName")
+            if isinstance(display_name, str) and display_name.strip().lower().startswith(FORBIDDEN_PLUGIN_DISPLAY_PREFIXES):
+                line_no = _find_line_for_token(lines, "displayName")
+                violations.append({
+                    "file": str(path_obj),
+                    "line": line_no,
+                    "rule": "PLUGIN_INVALID_DISPLAY_NAME",
+                    "matched": display_name,
+                    "line_text": lines[line_no - 1].strip()[:120] if line_no <= len(lines) else "",
+                    "message": f"Antigravity plugin displayName '{display_name}' must not start with Antigravity, Gemini, Claude, or Cursor.",
+                    "severity": "ERROR",
+                    "fix": "Choose a neutral displayName such as 'Token Optimizer'.",
+                })
+            prompts = pdata.get("suggestedPrompts")
+            if isinstance(prompts, list) and len(prompts) > 3:
+                line_no = _find_line_for_token(lines, "suggestedPrompts")
+                violations.append({
+                    "file": str(path_obj),
+                    "line": line_no,
+                    "rule": "PLUGIN_TOO_MANY_PROMPTS",
+                    "matched": f"{len(prompts)} prompts",
+                    "line_text": lines[line_no - 1].strip()[:120] if line_no <= len(lines) else "",
+                    "message": f"Antigravity plugin suggestedPrompts allows at most 3 items (found {len(prompts)}).",
+                    "severity": "ERROR",
+                    "fix": "Trim suggestedPrompts in plugin.json to 3 concise entries.",
+                })
+
+    return violations
+
+
+def check_rules_budget(files, strict=False):
+    """Check cumulative token footprint of always-on Antigravity rules against 20,000 tokens."""
+    total_tokens = 0
+    counted_files = []
+    for f in files:
+        path_obj = Path(f)
+        if not _is_antigravity_rule_file(path_obj):
+            continue
+        try:
+            text = path_obj.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        frontmatter = _parse_yaml_frontmatter(text)
+        trigger = _extract_rule_trigger(frontmatter) if frontmatter else None
+        is_always_active = (
+            path_obj.name.upper() in {"AGENTS.MD", "GEMINI.MD"}
+            or trigger == "always_on"
+        )
+        if is_always_active:
+            total_tokens += (len(text.encode("utf-8")) + 3) // 4
+            counted_files.append(str(path_obj))
+
+    if total_tokens > ANTIGRAVITY_RULES_TOKEN_BUDGET and counted_files:
+        return [{
+            "file": counted_files[0],
+            "line": 1,
+            "rule": "RULES_BUDGET_EXCEEDED",
+            "matched": f"{total_tokens} tokens across {len(counted_files)} file(s)",
+            "line_text": "",
+            "message": f"Always-on Antigravity rules total ~{total_tokens:,} tokens, exceeding the {ANTIGRAVITY_RULES_TOKEN_BUDGET:,}-token global budget before pointer demotion.",
+            "severity": "ERROR" if strict else "WARNING",
+            "fix": "Move task-specific rules to trigger: model_decision or glob, or prune redundant wording.",
+        }]
+    return []
+
+
 def check_file(file_path, strict=False):
     """Scan a single file for prompt cache invalidation patterns."""
     violations = []
@@ -350,6 +521,9 @@ def check_file(file_path, strict=False):
                     "severity": severity,
                     "fix": rule["fix"],
                 })
+
+    # Check Antigravity-specific rules frontmatter, 24KB limit, and plugin.json constraints
+    violations.extend(check_antigravity_rule_and_plugin(path_obj, full_text, lines))
 
     # Check for unsorted tool definitions across JSON, YAML, or code blocks
     tool_violations = check_tool_ordering(file_path, lines, full_text)
@@ -426,6 +600,8 @@ def main():
     for f in files:
         violations = check_file(f, strict=args.strict)
         all_violations.extend(violations)
+
+    all_violations.extend(check_rules_budget(files, strict=args.strict))
 
     error_count = sum(1 for v in all_violations if v["severity"] == "ERROR")
     warning_count = sum(1 for v in all_violations if v["severity"] == "WARNING")
