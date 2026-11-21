@@ -36,7 +36,7 @@ python tools/mcp_schema_compressor.py --input instructions.md --in-place
 python tools/mcp_schema_compressor.py --input schema.json --check
 ```
 
-Audit real Antigravity JSONL transcripts across CLI (`jetski`), Desktop, and IDE brains:
+Audit real Antigravity JSONL transcripts across CLI (`antigravity-cli` / `jetski`), Desktop, and IDE brains:
 
 ```bash
 python tools/transcript_analyzer.py --list

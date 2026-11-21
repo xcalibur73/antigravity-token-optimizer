@@ -74,6 +74,11 @@ What Hooks Do Not Solve (Remaining Bottlenecks):
 2. Quadratic `N^2` prefix compounding on 900+ turn threads: Even at a 94%+ cache hit rate, letting a session grow past 250k context forces every turn to re-read the entire accumulated prefix. Mitigate by running `/compact` or starting a new chat at 80k to 100k tokens (~250 to 300 steps).
 3. Large MCP and internal `GENERIC` tool responses: Structured tool payloads (10k+ tokens per call) bypass shell redirection and `read_file` hooks, so keep MCP queries tightly scoped.
 
+### Antigravity v2.34.0 Compatibility Notes
+1. Verified v2.34.0 transcript compatibility: `tools/transcript_analyzer.py` parses top-level `PLANNER_RESPONSE` telemetry (`input_tokens`, `cache_read_tokens`, `output_tokens`, `model`), hydrates truncated step fields from sibling `transcript_full.jsonl`, and discovers CLI transcripts under `~/.gemini/antigravity-cli/brain` as well as legacy `~/.gemini/jetski/brain`.
+2. Orchestrator / Executor split: When `Settings > Orchestrator Settings` pairs a Gemini 4 Neon planner with a Hydrogen or Flash executor, subagents configured with `model: inherit` that are invoked during execution turns inherit the active executor model.
+3. Rule budgets and MCP / MCP Apps payloads: Keep global and workspace `AGENTS.md` / `.agents/rules/*.md` files within budget via `tools/antigravity_prefix_linter.py --strict` to avoid per-turn prefix bloat and 429 request-limit errors, and scope MCP and MCP Apps queries tightly because their structured payloads bypass shell and file hooks.
+
 ### Measure Your Own Real Transcripts
 Use `tools/transcript_analyzer.py` to audit real Antigravity `transcript.jsonl` logs (supporting both Antigravity v2.32 top-level `PLANNER_RESPONSE` token telemetry - `input_tokens`, `cache_read_tokens`, and `output_tokens` where `prompt_tokens = input_tokens + cache_read_tokens` - and Gemini API `usageMetadata`) for KV cache hit rates, oversized command outputs (> 30 lines), unbounded `read_file`/`view_file` reads, and busy-wait polling sequences:
 
@@ -174,7 +179,7 @@ python tools/mcp_schema_compressor.py --input schema.json --check
 ```
 
 ### 3. Transcript Analyzer (`tools/transcript_analyzer.py`)
-Auto-discovers Antigravity `transcript.jsonl` files across CLI (`~/.gemini/jetski/brain`), Desktop (`~/.gemini/antigravity/brain`), and IDE (`~/.gemini/antigravity-ide/brain`) to measure KV cache hit rates across both Antigravity v2.32 top-level `PLANNER_RESPONSE` token fields (`input_tokens`, `cache_read_tokens`, `output_tokens`) and Gemini API `usageMetadata`. Runs `O(1)` reverse byte-seek `--tail` health checks, identifies Top-5 token consumers, flags oversized outputs (> 30 lines, including `"Command exited with code"` payloads on `GENERIC` steps), detects unbounded `read_file`/`view_file` calls (`Path` / `file_path`, including JSON-encoded path strings), polling loops, and redundant tool loops, and generates clean `<CONTEXT_SUMMARY>` `--handoff` prompts:
+Auto-discovers Antigravity `transcript.jsonl` files across CLI (`~/.gemini/antigravity-cli/brain` and `~/.gemini/jetski/brain`), Desktop (`~/.gemini/antigravity/brain`), and IDE (`~/.gemini/antigravity-ide/brain`) to measure KV cache hit rates across both Antigravity v2.32+ top-level `PLANNER_RESPONSE` token fields (`input_tokens`, `cache_read_tokens`, `output_tokens`) and Gemini API `usageMetadata`. Automatically hydrates truncated step fields from sibling `transcript_full.jsonl`, runs `O(1)` reverse byte-seek `--tail` health checks, identifies Top-5 token consumers, flags oversized outputs (> 30 lines, including `"Command exited with code"` payloads on `GENERIC` steps), detects unbounded `read_file`/`view_file` calls (`Path` / `file_path`, including JSON-encoded path strings) while exempting existing compact files (`<= 150` lines / 12 KB), detects polling loops and redundant tool loops, and generates clean `<CONTEXT_SUMMARY>` `--handoff` prompts:
 
 ```bash
 python tools/transcript_analyzer.py --list

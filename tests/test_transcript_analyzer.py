@@ -255,6 +255,120 @@ class TestTranscriptAnalyzer(unittest.TestCase):
             if path.exists():
                 path.unlink()
 
+    def test_v234_antigravity_cli_discovery(self):
+        from tools.transcript_analyzer import discover_transcripts
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            for rel, cid in (
+                (".gemini/antigravity-cli/brain", "conv-cli"),
+                (".gemini/jetski/brain", "conv-legacy"),
+            ):
+                log_dir = fake_home / rel / cid / ".system_generated" / "logs"
+                log_dir.mkdir(parents=True)
+                with open(log_dir / "transcript.jsonl", "w", encoding="utf-8") as f:
+                    f.write(json.dumps({"step_index": 0, "type": "USER_INPUT", "content": cid}) + "\n")
+
+            discovered = discover_transcripts(home_dir=fake_home)
+            self.assertEqual(len(discovered), 2)
+            self.assertTrue(all(item["runtime"] == "cli" for item in discovered))
+            conv_ids = {item["conversation_id"] for item in discovered}
+            self.assertIn("conv-cli", conv_ids)
+            self.assertIn("conv-legacy", conv_ids)
+
+    def test_v234_transcript_full_hydration_for_truncated_steps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            compact_content = "\n".join(f"line {i:02d} " + ("x" * 192) for i in range(20))
+            self.assertEqual(len(compact_content), 4019)
+            full_content = "Command exited with code 0.\n" + "\n".join(
+                f"row {i:03d} " + ("y" * 92) for i in range(120)
+            )
+
+            hydrated_dir = root / "hydrated"
+            hydrated_dir.mkdir()
+            compact_path = hydrated_dir / "transcript.jsonl"
+            full_path = hydrated_dir / "transcript_full.jsonl"
+            compact_records = [
+                {"step_index": 0, "type": "USER_INPUT", "content": "Run suite"},
+                {
+                    "step_index": 1,
+                    "type": "GENERIC",
+                    "content": compact_content,
+                    "truncated_fields": ["content"],
+                },
+            ]
+            full_records = [
+                {"step_index": 0, "type": "USER_INPUT", "content": "Run suite"},
+                {"step_index": 1, "type": "GENERIC", "content": full_content},
+            ]
+            with open(compact_path, "w", encoding="utf-8") as f:
+                for rec in compact_records:
+                    f.write(json.dumps(rec) + "\n")
+            with open(full_path, "w", encoding="utf-8") as f:
+                for rec in full_records:
+                    f.write(json.dumps(rec) + "\n")
+
+            report = analyze_transcript(compact_path)
+            top = report["findings"]["top_consumers"][0]
+            self.assertEqual(top["step_index"], 1)
+            self.assertGreaterEqual(top["estimated_tokens"], 2500)
+            self.assertGreaterEqual(top["lines"], 120)
+            oversized = report["findings"]["oversized_outputs_over_30_lines"]
+            self.assertEqual([item["step_index"] for item in oversized], [1])
+
+            mismatch_dir = root / "mismatched"
+            mismatch_dir.mkdir()
+            mismatch_compact = mismatch_dir / "transcript.jsonl"
+            mismatch_full = mismatch_dir / "transcript_full.jsonl"
+            with open(mismatch_compact, "w", encoding="utf-8") as f:
+                for rec in compact_records:
+                    f.write(json.dumps(rec) + "\n")
+            mismatch_full_records = [
+                {"step_index": 0, "type": "USER_INPUT", "content": "Run suite"},
+                {"step_index": 99, "type": "GENERIC", "content": full_content},
+            ]
+            with open(mismatch_full, "w", encoding="utf-8") as f:
+                for rec in mismatch_full_records:
+                    f.write(json.dumps(rec) + "\n")
+
+            mismatch_report = analyze_transcript(mismatch_compact)
+            self.assertEqual(mismatch_report["findings"]["oversized_outputs_over_30_lines"], [])
+            mismatch_top = mismatch_report["findings"]["top_consumers"][0]
+            self.assertEqual(mismatch_top["lines"], 20)
+            self.assertLess(mismatch_top["estimated_tokens"], 1500)
+
+    def test_v234_compact_existing_file_exempt_from_unbounded_reads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            small_json = root / "small.json"
+            small_lines = ["{"] + [f'  "k{i}": {i},' for i in range(37)] + ['  "k37": 37', "}"]
+            small_json.write_text("\n".join(small_lines) + "\n", encoding="utf-8")
+
+            large_py = root / "large.py"
+            large_py.write_text("\n".join(f"val_{i} = {i}" for i in range(220)) + "\n", encoding="utf-8")
+
+            missing_path = "/repo/missing.py"
+            records = [
+                {"step_index": 0, "type": "PLANNER_RESPONSE", "tool_calls": [{"name": "read_file", "arguments": {"Path": str(small_json)}}]},
+                {"step_index": 1, "type": "PLANNER_RESPONSE", "tool_calls": [{"name": "read_file", "arguments": {"Path": str(small_json)}}]},
+                {"step_index": 2, "type": "PLANNER_RESPONSE", "tool_calls": [{"name": "read_file", "arguments": {"Path": str(small_json)}}]},
+                {"step_index": 3, "type": "PLANNER_RESPONSE", "tool_calls": [{"name": "read_file", "arguments": {"Path": str(large_py)}}]},
+                {"step_index": 4, "type": "PLANNER_RESPONSE", "tool_calls": [{"name": "read_file", "arguments": {"Path": missing_path}}]},
+            ]
+            log_path = root / "transcript.jsonl"
+            with open(log_path, "w", encoding="utf-8") as f:
+                for rec in records:
+                    f.write(json.dumps(rec) + "\n")
+
+            report = analyze_transcript(log_path)
+            unbounded_paths = [item["path"] for item in report["findings"]["unbounded_view_file_calls"]]
+            self.assertEqual(unbounded_paths, [str(large_py), missing_path])
+            loops = report["findings"]["redundant_tool_loops"]
+            self.assertEqual(len(loops), 1)
+            self.assertEqual(loops[0]["tool"], "read_file")
+            self.assertEqual(loops[0]["repeats"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

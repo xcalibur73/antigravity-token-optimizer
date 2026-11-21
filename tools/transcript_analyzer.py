@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Google Antigravity Transcript Analyzer.
 
-Audits real Antigravity `transcript.jsonl` logs across Desktop (`~/.gemini/antigravity/brain`),
-IDE (`~/.gemini/antigravity-ide/brain`), and CLI (`~/.gemini/jetski/brain`) to measure:
+Audits real Antigravity `transcript.jsonl` logs across
+`~/.gemini/{antigravity-cli,jetski,antigravity,antigravity-ide}/brain` to measure:
 - Actual KV prompt cache hit rates (`usageMetadata` / char-based estimation fallback)
 - `O(1)` reverse byte-seek context window health (`--tail`)
 - Top 5 token consumers & redundant/failing tool loops
@@ -24,12 +24,36 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ANTIGRAVITY_RUNTIME_ROOTS = (
+    ("cli", ".gemini/antigravity-cli/brain"),
     ("cli", ".gemini/jetski/brain"),
     ("desktop", ".gemini/antigravity/brain"),
     ("ide", ".gemini/antigravity-ide/brain"),
 )
 
 DEFAULT_CONTEXT_LIMIT = 200_000
+COMPACT_READ_MAX_LINES = 150
+COMPACT_READ_MAX_BYTES = 12288
+
+
+def _is_compact_existing_file(path_str: str) -> bool:
+    """Return True if path_str is an existing regular file <= 150 lines and <= 12 KB."""
+    if not path_str:
+        return False
+    try:
+        p = Path(path_str)
+        if not p.is_file():
+            return False
+        if p.stat().st_size > COMPACT_READ_MAX_BYTES:
+            return False
+        count = 0
+        with open(p, "rb") as f:
+            for _ in f:
+                count += 1
+                if count > COMPACT_READ_MAX_LINES:
+                    return False
+        return count <= COMPACT_READ_MAX_LINES
+    except (OSError, ValueError):
+        return False
 
 
 def _estimate_tokens(text: str) -> int:
@@ -157,6 +181,7 @@ def discover_transcripts(home_dir: Path | None = None, limit: int = 20) -> list[
     """Discover real Antigravity transcript.jsonl files across CLI, Desktop, and IDE brains."""
     base_home = Path(home_dir) if home_dir is not None else Path.home()
     found = []
+    seen_paths = set()
 
     for runtime, rel_root in ANTIGRAVITY_RUNTIME_ROOTS:
         brain_root = base_home / rel_root
@@ -172,10 +197,14 @@ def discover_transcripts(home_dir: Path | None = None, limit: int = 20) -> list[
                 if not log_path.is_file():
                     continue
                 try:
+                    resolved = str(log_path.resolve())
+                    if resolved in seen_paths:
+                        continue
                     st = log_path.stat()
                     conv_id = log_path.parent.parent.parent.relative_to(brain_root).as_posix()
                 except (OSError, ValueError):
                     continue
+                seen_paths.add(resolved)
                 found.append({
                     "conversation_id": conv_id,
                     "runtime": runtime,
@@ -284,6 +313,52 @@ def _describe_step_consumer(step: dict, step_id, content: str, tool_calls: list)
     return label, score_tokens
 
 
+def _hydrate_truncated_steps(jsonl_path: Path, steps: list[dict]) -> None:
+    """Hydrate truncated content/tool_calls fields from sibling transcript_full.jsonl."""
+    if jsonl_path.name == "transcript_full.jsonl":
+        return
+    full_path = jsonl_path.with_name("transcript_full.jsonl")
+    if not full_path.is_file():
+        return
+
+    needed: dict[int, set[str]] = {}
+    for idx, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        truncated_fields = step.get("truncated_fields")
+        if not isinstance(truncated_fields, list):
+            continue
+        wanted = {f for f in truncated_fields if isinstance(f, str) and f in {"content", "tool_calls"}}
+        if wanted:
+            needed[idx] = wanted
+
+    if not needed:
+        return
+
+    max_needed = max(needed)
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+            full_idx = 0
+            for raw_line in f:
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                if full_idx in needed:
+                    try:
+                        full_rec = json.loads(stripped)
+                    except json.JSONDecodeError:
+                        full_rec = None
+                    if isinstance(full_rec, dict) and full_rec.get("step_index") == steps[full_idx].get("step_index"):
+                        for field in needed[full_idx]:
+                            if field in full_rec:
+                                steps[full_idx][field] = full_rec[field]
+                full_idx += 1
+                if full_idx > max_needed:
+                    break
+    except OSError:
+        return
+
+
 def analyze_transcript(jsonl_path: Path, context_limit: int = DEFAULT_CONTEXT_LIMIT) -> dict:
     """Parse a JSONL transcript and compute real token, cache, top-consumer, and invariant diagnostics."""
     steps = []
@@ -296,6 +371,8 @@ def analyze_transcript(jsonl_path: Path, context_limit: int = DEFAULT_CONTEXT_LI
                 steps.append(json.loads(stripped))
             except json.JSONDecodeError as exc:
                 raise ValueError(f"Invalid JSON on line {line_no}: {exc}") from exc
+
+    _hydrate_truncated_steps(jsonl_path, steps)
 
     total_prompt_tokens = 0
     total_cached_tokens = 0
@@ -392,10 +469,12 @@ def analyze_transcript(jsonl_path: Path, context_limit: int = DEFAULT_CONTEXT_LI
                         or args.get("file_path")
                         or args.get("path")
                     )
-                    unbounded_reads.append({
-                        "step_index": step_id,
-                        "path": _clean_arg_str(raw_path) or "<unknown>",
-                    })
+                    cleaned_path = _clean_arg_str(raw_path)
+                    if not (cleaned_path and _is_compact_existing_file(cleaned_path)):
+                        unbounded_reads.append({
+                            "step_index": step_id,
+                            "path": cleaned_path or "<unknown>",
+                        })
 
             if name in {"manage_task", "manage_subagents"} and isinstance(args, dict):
                 action = str(args.get("Action") or args.get("action") or "").lower()
@@ -618,7 +697,7 @@ def main():
             print(json.dumps({"sessions": sessions}, indent=2))
             return
         if not sessions:
-            print("No Antigravity transcripts found under ~/.gemini/{jetski,antigravity,antigravity-ide}/brain.")
+            print("No Antigravity transcripts found under ~/.gemini/{antigravity-cli,jetski,antigravity,antigravity-ide}/brain.")
             return
         print(f"Discovered {len(sessions)} Antigravity transcript(s):")
         for s in sessions:
@@ -628,7 +707,7 @@ def main():
     if args.latest:
         sessions = discover_transcripts(limit=1)
         if not sessions:
-            sys.stderr.write("Error: No Antigravity transcripts found under ~/.gemini/{jetski,antigravity,antigravity-ide}/brain.\n")
+            sys.stderr.write("Error: No Antigravity transcripts found under ~/.gemini/{antigravity-cli,jetski,antigravity,antigravity-ide}/brain.\n")
             sys.exit(1)
         path = Path(sessions[0]["path"])
     elif args.transcript:
